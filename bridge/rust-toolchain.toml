@@ -1,3 +1,8 @@
 [toolchain]
-channel = "stable"
+# MUST exactly match the toolchain preinstalled in the Docker builder image:
+#   docker run --rm --entrypoint sh <builder-image> -c 'ls /usr/local/rustup/toolchains'
+# Take the directory name and strip the "-x86_64-unknown-linux-gnu" suffix.
+# Any mismatch makes rustup try to download the toolchain from the internet,
+# which fails in the corporate build environment.
+channel = "1.94.0"
 components = ["rustfmt", "clippy"]

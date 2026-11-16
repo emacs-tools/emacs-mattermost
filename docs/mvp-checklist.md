@@ -37,24 +37,27 @@
 
 ## Phase 1 — minimal Rust bridge
 
-- [ ] Add Cargo workspace.
-- [ ] Add crate manifests.
-- [ ] Add minimal mm-core types.
-- [ ] Add JSONL protocol types.
-- [ ] Add TCP listener.
-- [ ] Implement ping.
-- [ ] Implement status.
-- [ ] Add smoke test for ping.
+- [x] Add Cargo workspace.
+- [x] Add crate manifests.
+- [x] Add minimal mm-core types.
+- [x] Add JSONL protocol types.
+- [x] Add TCP listener.
+- [x] Implement ping.
+- [x] Implement status.
+- [x] Add smoke test for ping/status.
 
 ## Phase 2 — Docker and status web UI
 
-- [ ] Add Dockerfile.
-- [ ] Add compose.yaml.
-- [ ] Add bridge config from environment.
-- [ ] Add /health.
-- [ ] Add /status JSON.
-- [ ] Add simple HTML status page.
-- [ ] Verify bridge runs separately from Emacs.
+- [x] Add Dockerfile.
+- [x] Add compose.yaml.
+- [x] Add bridge config from environment.
+- [x] Add /health.
+- [x] Add /status JSON.
+- [x] Add simple HTML status page.
+- [x] Add Docker helper scripts.
+- [x] Add web smoke script.
+- [ ] Verify local bridge + web smoke.
+- [ ] Verify Docker Compose bridge + web smoke.
 
 ## Phase 3 — authentication
 
@@ -134,4 +137,8 @@
 
 ## Next atomic step
 
-Add Rust workspace and minimal compiling bridge with ping/status over TCP JSONL.
+Verify Phase 2 locally and in Docker Compose.
+
+After that:
+
+Implement authentication foundation: connect, me, login/password, token cache.

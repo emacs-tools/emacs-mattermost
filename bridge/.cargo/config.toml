@@ -1,3 +1,18 @@
 [alias]
 check-all = "check --workspace"
 test-all = "test --workspace"
+
+# Corporate environment: crates.io is replaced with internal Nexus mirror.
+[registries.nexus]
+index = "sparse+https://nexus.c68.spacecorp.ru/repository/cargo/"
+
+[source.crates-io]
+replace-with = "nexus"
+
+# MSRV-aware dependency resolution (cargo >= 1.84).
+# Cargo selects dependency versions compatible with workspace rust-version.
+[resolver]
+incompatible-rust-versions = "fallback"
+
+[net]
+retry = 3

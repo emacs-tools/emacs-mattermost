@@ -1,17 +1,21 @@
-use mm_core::{BridgeState, ServerSummary};
-use serde_json::{json, Value};
+use mm_core::BridgeStatus;
+use serde_json::Value;
 
 pub const BRIDGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub fn status_result() -> Value {
-    let servers: Vec<ServerSummary> = Vec::new();
+pub fn current_status() -> BridgeStatus {
+    BridgeStatus::running(BRIDGE_VERSION)
+}
 
-    json!({
-        "bridge": {
-            "version": BRIDGE_VERSION,
-            "state": BridgeState::Running,
-        },
-        "servers": servers,
+pub fn status_result() -> Value {
+    serde_json::to_value(current_status()).unwrap_or_else(|_| {
+        serde_json::json!({
+            "bridge": {
+                "version": BRIDGE_VERSION,
+                "state": "running"
+            },
+            "servers": []
+        })
     })
 }
 

@@ -1,0 +1,2 @@
+{"id":"smoke-ping","type":"request","method":"ping","params":{}}
+{"id":"smoke-status","type":"request","method":"status","params":{}}

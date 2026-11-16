@@ -1,0 +1,34 @@
+## {ROOT_DIR}/.gitignore
+
+# Rust / Cargo
+bridge/target/
+**/*.rs.bk
+*.pdb
+
+# Local runtime data
+data/
+.cache/
+*.log
+
+# Secrets / local auth material
+.env
+.env.*
+*.token
+*.pat
+*.session
+authinfo
+.authinfo
+secrets/
+secret/
+docker/secrets/
+
+# Editor / OS
+*~
+\#*\#
+.\#*
+.DS_Store
+Thumbs.db
+
+# Emacs compiled/test artifacts
+*.elc
+tests/elisp/.ert-runner/

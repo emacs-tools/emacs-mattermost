@@ -1,9 +1,9 @@
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
-use crate::app;
+use crate::app::App;
 
-pub async fn handle_client(stream: TcpStream) -> std::io::Result<()> {
+pub async fn handle_client(app: App, stream: TcpStream) -> std::io::Result<()> {
     let peer = stream.peer_addr().ok();
     tracing::info!(?peer, "client connected");
 
@@ -15,7 +15,7 @@ pub async fn handle_client(stream: TcpStream) -> std::io::Result<()> {
             continue;
         }
 
-        let response = app::response_line(&line);
+        let response = app.response_line(&line).await;
         write_half.write_all(response.as_bytes()).await?;
         write_half.flush().await?;
     }

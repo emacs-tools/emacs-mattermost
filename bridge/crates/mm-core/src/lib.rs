@@ -8,4 +8,6 @@ pub mod model;
 
 pub use error::{BridgeError, ErrorKind};
 pub use ids::{ChannelId, PostId, ServerId, TeamId, UserId};
-pub use model::{BridgeInfo, BridgeState, BridgeStatus, ServerSummary};
+pub use model::{
+    BridgeInfo, BridgeState, BridgeStatus, Post, ServerConfig, ServerSummary, Team, User,
+};

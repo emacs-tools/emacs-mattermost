@@ -1,1 +1,1 @@
-//! auth module placeholder.
+//! Authentication helpers.

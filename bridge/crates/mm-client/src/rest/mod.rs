@@ -1,1 +1,1 @@
-//! rest module placeholder.
+//! REST API endpoints.

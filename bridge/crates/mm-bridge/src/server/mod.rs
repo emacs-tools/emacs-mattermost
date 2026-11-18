@@ -1,4 +1,4 @@
-use crate::{config::BridgeConfig, status, transport};
+use crate::{app::App, config::BridgeConfig, status, transport};
 use anyhow::Context;
 use mm_web::state::WebState;
 use tokio::net::TcpListener;
@@ -10,11 +10,12 @@ pub async fn run(config: BridgeConfig) -> anyhow::Result<()> {
 
     tracing::info!(listen = %config.listen, "bridge listening");
 
-    let web_state = WebState::new(status::current_status());
+    let app = App::new(config.data_dir.clone());
+    let web_state = WebState::new(status::current_status(&config.data_dir));
     let web_task = tokio::spawn(mm_web::run(config.web_listen.clone(), web_state));
 
     tokio::select! {
-        result = accept_loop(tcp_listener) => {
+        result = accept_loop(tcp_listener, app) => {
             result
         }
         result = web_task => {
@@ -27,13 +28,14 @@ pub async fn run(config: BridgeConfig) -> anyhow::Result<()> {
     }
 }
 
-async fn accept_loop(listener: TcpListener) -> anyhow::Result<()> {
+async fn accept_loop(listener: TcpListener, app: App) -> anyhow::Result<()> {
     loop {
         let (stream, peer) = listener.accept().await.context("accept failed")?;
         tracing::debug!(%peer, "accepted connection");
 
+        let app = app.clone();
         tokio::spawn(async move {
-            if let Err(error) = transport::handle_client(stream).await {
+            if let Err(error) = transport::handle_client(app, stream).await {
                 tracing::warn!(%error, "client handler failed");
             }
         });

@@ -1,1 +1,1 @@
-//! ws module placeholder.
+//! WebSocket client.

@@ -56,18 +56,46 @@
 - [x] Add simple HTML status page.
 - [x] Add Docker helper scripts.
 - [x] Add web smoke script.
-- [ ] Verify local bridge + web smoke.
-- [ ] Verify Docker Compose bridge + web smoke.
+- [x] Verify local bridge + web smoke.
+- [x] Verify Docker Compose bridge + web smoke.
 
-## Phase 3 — authentication
+## Phase 3a — storage foundation (no network)
 
-- [ ] Implement login/password against Mattermost 10.9.3.
-- [ ] Save session token to cache file.
-- [ ] Load saved session token.
-- [ ] Support PAT token.
-- [ ] Implement connect.
-- [ ] Implement me.
-- [ ] Ensure tokens are never logged.
+- [x] mm-core: User model.
+- [x] mm-core: ServerConfig model.
+- [x] mm-core: ServerSummary.has_token.
+- [x] mm-store: TokenStore (load/save/delete/list).
+- [x] Atomic token writes via temp file + rename.
+- [x] Private file mode 0600 on Unix.
+- [x] server_id validation against path traversal.
+- [x] mm-store: ServerStore for non-secret config.
+- [x] MM_DATA_DIR config with host default.
+- [x] App state carries data_dir.
+- [x] status reads persisted stores, never exposes secrets.
+- [x] Unit tests for stores and status.
+- [x] Verify cargo test locally.
+- [x] Verify status shows a stored server without leaking the token.
+
+## Phase 3b — authentication (network)
+
+### 3b-1: HTTP client foundation
+
+- [ ] mm-client crate skeleton.
+- [ ] reqwest dependency with rustls-tls-native-roots (for system CA) + explicit CA support.
+- [ ] Client struct with base_url and optional ca_file.
+- [ ] login(login_id, password) -> Result<String, Error> (extracts Token header).
+- [ ] get_me(token) -> Result<User, Error>.
+- [ ] Unit/integration tests for client construction.
+
+### 3b-2: Bridge integration
+
+- [ ] Implement connect method in bridge.
+- [ ] Implement me method in bridge.
+- [ ] Save session token via TokenStore on successful connect.
+- [ ] Load saved token on startup (future: auto-reconnect).
+- [ ] Support PAT token (same flow, just skip login).
+- [ ] Map Mattermost API errors to normalized error codes.
+- [ ] Ensure tokens/passwords are never logged.
 
 ## Phase 4 — self-DM vertical slice
 

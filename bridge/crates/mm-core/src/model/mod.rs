@@ -75,4 +75,6 @@ pub struct Post {
     pub create_at: i64,
     pub update_at: i64,
     pub delete_at: i64,
+    #[serde(default)]
+    pub file_ids: Vec<String>,
 }

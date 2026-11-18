@@ -11,4 +11,5 @@ else
   read -r INPUT
 fi
 
-printf '%s\n' "$INPUT" | nc -w 2 "$HOST" "$PORT"
+# Use -q 1 to wait 1 second for response after EOF on stdin
+printf '%s\n' "$INPUT" | nc -q 1 "$HOST" "$PORT"

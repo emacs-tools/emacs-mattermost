@@ -194,3 +194,26 @@ See `docs/mvp-checklist.md` for the detailed checklist.
 
 Current state: phases 0-3a complete (storage foundation).
 Next: phase 3b (REST client, auth, connect/me).
+
+## Verification
+
+To verify the bridge works against your corporate Mattermost instance:
+
+1. Start the bridge: `./scripts/docker-up.sh`
+2. Connect and get a token:
+   ```bash
+   ./scripts/mm-cli.sh '{"id":"1","type":"request","method":"connect","params":{"server_id":"work","url":"https://mm.local","login_id":"user","password":"pass"}}'
+   ```
+3. Open self-DM channel:
+   ```bash
+   ./scripts/mm-cli.sh '{"id":"2","type":"request","method":"open_self_dm","params":{"server_id":"work"}}'
+   ```
+4. Send a message to yourself:
+   ```bash
+   ./scripts/mm-cli.sh '{"id":"3","type":"request","method":"send_post","params":{"server_id":"work","channel_id":"<ID_FROM_STEP_3>","message":"Test"}}'
+   ```
+4. Check history:
+   ```bash
+   ./scripts/mm-cli.sh '{"id":"4","type":"request","method":"get_history","params":{"server_id":"work","channel_id":"<ID_FROM_STEP_3>","limit":1}}'
+   ```
+

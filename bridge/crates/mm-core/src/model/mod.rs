@@ -65,6 +65,17 @@ pub struct Team {
     pub display_name: String,
 }
 
+/// Normalized Mattermost channel. Only fields needed by the MVP UI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Channel {
+    pub id: ChannelId,
+    pub team_id: TeamId,
+    #[serde(rename = "type")]
+    pub channel_type: String, // "O" (Open), "P" (Private), "D" (Direct), "G" (Group)
+    pub display_name: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Post {
     pub id: PostId,

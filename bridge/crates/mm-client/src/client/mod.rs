@@ -1,6 +1,6 @@
 use crate::error::ClientError;
 use crate::tls;
-use mm_core::{ChannelId, Post, Team, User}; // Добавим Post и Team в mm-core позже
+use mm_core::{Channel, ChannelId, Post, User};
 use reqwest::header::AUTHORIZATION;
 use std::path::Path;
 
@@ -34,9 +34,8 @@ impl MattermostClient {
             .map_err(ClientError::Http)?;
 
         if !response.status().is_success() {
-            return handle_api_error_string(response)
-                .await
-                .map(|_| unreachable!());
+            let err = api_error(response).await;
+            return Err(err);
         }
 
         let token = response
@@ -60,15 +59,15 @@ impl MattermostClient {
             .map_err(ClientError::Http)?;
 
         if !response.status().is_success() {
-            return handle_api_error_user(response).await;
+            return Err(api_error(response).await);
         }
 
         let user: User = response.json().await.map_err(ClientError::Http)?;
         Ok(user)
     }
 
-    pub async fn get_teams(&self, token: &str) -> Result<Vec<Team>, ClientError> {
-        let url = format!("{}/api/v4/teams", self.base_url);
+    pub async fn get_teams(&self, token: &str) -> Result<Vec<mm_core::Team>, ClientError> {
+        let url = format!("{}/api/v4/users/me/teams", self.base_url);
         let response = self
             .client
             .get(&url)
@@ -78,11 +77,29 @@ impl MattermostClient {
             .map_err(ClientError::Http)?;
 
         if !response.status().is_success() {
-            return handle_api_error_vec(response).await;
+            return Err(api_error(response).await);
         }
 
-        let teams: Vec<Team> = response.json().await.map_err(ClientError::Http)?;
+        let teams: Vec<mm_core::Team> = response.json().await.map_err(ClientError::Http)?;
         Ok(teams)
+    }
+
+    pub async fn get_my_channels(&self, token: &str) -> Result<Vec<Channel>, ClientError> {
+        let url = format!("{}/api/v4/users/me/channels", self.base_url);
+        let response = self
+            .client
+            .get(&url)
+            .header(AUTHORIZATION, format!("Bearer {}", token))
+            .send()
+            .await
+            .map_err(ClientError::Http)?;
+
+        if !response.status().is_success() {
+            return Err(api_error(response).await);
+        }
+
+        let channels: Vec<Channel> = response.json().await.map_err(ClientError::Http)?;
+        Ok(channels)
     }
 
     pub async fn create_direct_channel(
@@ -101,7 +118,7 @@ impl MattermostClient {
             .map_err(ClientError::Http)?;
 
         if !response.status().is_success() {
-            return handle_api_error_channel(response).await;
+            return Err(api_error(response).await);
         }
 
         #[derive(serde::Deserialize)]
@@ -113,16 +130,21 @@ impl MattermostClient {
         Ok(ChannelId::new(ch.id))
     }
 
+    /// Get posts for a channel. `before` = oldest known post id for pagination.
     pub async fn get_posts(
         &self,
         token: &str,
         channel_id: &str,
         limit: u32,
+        before: Option<&str>,
     ) -> Result<Vec<Post>, ClientError> {
-        let url = format!(
-            "{}/api/v4/channels/{}/posts?page=0&per_page={}",
+        let mut url = format!(
+            "{}/api/v4/channels/{}/posts?per_page={}",
             self.base_url, channel_id, limit
         );
+        if let Some(b) = before {
+            url.push_str(&format!("&before={}", b));
+        }
 
         let response = self
             .client
@@ -133,10 +155,9 @@ impl MattermostClient {
             .map_err(ClientError::Http)?;
 
         if !response.status().is_success() {
-            return handle_api_error_vec(response).await;
+            return Err(api_error(response).await);
         }
 
-        // Mattermost returns { order: [], posts: {} }
         #[derive(serde::Deserialize)]
         struct PostsResponse {
             order: Vec<String>,
@@ -145,16 +166,13 @@ impl MattermostClient {
 
         let data: PostsResponse = response.json().await.map_err(ClientError::Http)?;
 
-        // Normalize to ordered vector
         let mut posts: Vec<Post> = data
             .order
             .iter()
             .filter_map(|id| data.posts.get(id).cloned())
             .collect();
 
-        // Sort ascending by create_at for display
         posts.sort_by_key(|p| p.create_at);
-
         Ok(posts)
     }
 
@@ -186,7 +204,7 @@ impl MattermostClient {
             .map_err(ClientError::Http)?;
 
         if !response.status().is_success() {
-            return handle_api_error_post(response).await;
+            return Err(api_error(response).await);
         }
 
         let post: Post = response.json().await.map_err(ClientError::Http)?;
@@ -194,39 +212,23 @@ impl MattermostClient {
     }
 }
 
-// --- Helpers for error handling ---
-
-async fn handle_api_error_string(response: reqwest::Response) -> Result<String, ClientError> {
+async fn api_error(response: reqwest::Response) -> ClientError {
     let status = response.status().as_u16();
     let body = response.text().await.unwrap_or_default();
+
     #[derive(serde::Deserialize)]
     struct MmError {
         id: String,
         message: String,
     }
-    let err_msg = serde_json::from_str::<MmError>(&body)
-        .map(|e| format!("{} ({})", e.message, e.id))
-        .unwrap_or_else(|_| body.clone());
-    Err(ClientError::Api {
-        id: "api_error".into(),
-        message: err_msg,
-        status_code: status,
-    })
-}
 
-async fn handle_api_error_user(response: reqwest::Response) -> Result<User, ClientError> {
-    handle_api_error_string(response).await?;
-    unreachable!()
-}
-async fn handle_api_error_vec<T>(response: reqwest::Response) -> Result<Vec<T>, ClientError> {
-    handle_api_error_string(response).await?;
-    unreachable!()
-}
-async fn handle_api_error_channel(response: reqwest::Response) -> Result<ChannelId, ClientError> {
-    handle_api_error_string(response).await?;
-    unreachable!()
-}
-async fn handle_api_error_post(response: reqwest::Response) -> Result<Post, ClientError> {
-    handle_api_error_string(response).await?;
-    unreachable!()
+    let (id, message) = serde_json::from_str::<MmError>(&body)
+        .map(|e| (e.id, e.message))
+        .unwrap_or_else(|_| ("api_error".to_string(), body));
+
+    ClientError::Api {
+        id,
+        message,
+        status_code: status,
+    }
 }

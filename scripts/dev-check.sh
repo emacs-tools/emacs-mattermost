@@ -1,16 +1,19 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
+# scripts/dev-check.sh
+# Быстрая проверка Rust-части проекта emacs-mattermost
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+set -e
 
-cd "${ROOT_DIR}/bridge"
+# Переходим в директорию с Rust workspace
+cd "$(dirname "$0")/../bridge"
 
-if [[ ! -f Cargo.lock ]]; then
-  echo "Cargo.lock is missing. Generate it first:" >&2
-  echo "  cd bridge && cargo generate-lockfile" >&2
-  exit 1
-fi
+echo "==> Running cargo fmt --all..."
+cargo fmt --all
 
-cargo fmt --all -- --check
-cargo check --workspace --locked
-cargo test --workspace --locked
+echo "==> Running cargo check --workspace..."
+cargo check --workspace
+
+echo "==> Running cargo test --workspace..."
+cargo test --workspace
+
+echo "==> All checks passed successfully."

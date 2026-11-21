@@ -1,8 +1,9 @@
 use crate::app::state::{AppState, ConnectionState};
 use crate::protocol;
 use mm_client::MattermostClient;
-use mm_core::{BridgeError, Channel, ErrorKind, ServerConfig, ServerId, User};
+use mm_core::{BridgeError, Channel, ErrorKind, Post, ServerConfig, ServerId, User};
 use mm_store::{ServerStore, TokenStore};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 pub async fn handle_connect(
@@ -160,7 +161,6 @@ pub async fn handle_list_channels(
 
     match client.get_my_channels(&token).await {
         Ok(mut channels) => {
-            // Пост-обработка: разрешение имён для DM-каналов
             for ch in &mut channels {
                 if ch.channel_type == "D" && ch.display_name.is_empty() {
                     let parts: Vec<&str> = ch.name.split("__").collect();
@@ -172,14 +172,7 @@ pub async fn handle_list_channels(
                         };
 
                         if let Ok(other_user) = client.get_user(&token, other_user_id).await {
-                            let name = if !other_user.first_name.is_empty() {
-                                format!("{} {}", other_user.first_name, other_user.last_name)
-                                    .trim()
-                                    .to_string()
-                            } else {
-                                other_user.username
-                            };
-                            ch.display_name = name;
+                            ch.display_name = other_user.display_name();
                         }
                     }
                 }
@@ -267,16 +260,59 @@ pub async fn handle_get_history(
     };
 
     match client.get_posts(&token, channel_id, limit, before).await {
-        Ok(posts) => protocol::Response::ok(
-            request.id,
-            serde_json::json!({
-                "server_id": server_id,
-                "channel_id": channel_id,
-                "posts": posts,
-                "before": before,
-            }),
-        ),
+        Ok(mut posts) => {
+            // Обогащаем посты именами отправителей
+            enrich_posts_with_display_names(&client, &token, &mut posts).await;
+
+            protocol::Response::ok(
+                request.id,
+                serde_json::json!({
+                    "server_id": server_id,
+                    "channel_id": channel_id,
+                    "posts": posts,
+                    "before": before,
+                }),
+            )
+        }
         Err(e) => protocol::Response::err(request.id, e.into()),
+    }
+}
+
+/// Batch-resolve user_ids in posts to human-readable display names.
+async fn enrich_posts_with_display_names(
+    client: &MattermostClient,
+    token: &str,
+    posts: &mut [Post],
+) {
+    // Собираем уникальные user_id
+    let unique_ids: Vec<String> = posts
+        .iter()
+        .map(|p| p.user_id.0.clone())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    if unique_ids.is_empty() {
+        return;
+    }
+
+    // Batch-запрос профилей
+    match client.get_users_by_ids(token, &unique_ids).await {
+        Ok(users) => {
+            let name_map: HashMap<String, String> = users
+                .into_iter()
+                .map(|u| (u.id.0.clone(), u.display_name()))
+                .collect();
+
+            for post in posts.iter_mut() {
+                if let Some(name) = name_map.get(&post.user_id.0) {
+                    post.user_display_name = name.clone();
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to resolve user display names, falling back to IDs");
+        }
     }
 }
 

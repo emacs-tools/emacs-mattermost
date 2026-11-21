@@ -51,6 +51,20 @@ pub struct User {
     pub last_name: String,
 }
 
+impl User {
+    /// Human-readable display name: "First Last", falling back to username.
+    pub fn display_name(&self) -> String {
+        let full = format!("{} {}", self.first_name, self.last_name)
+            .trim()
+            .to_string();
+        if full.is_empty() {
+            self.username.clone()
+        } else {
+            full
+        }
+    }
+}
+
 /// Persisted per-server configuration (no secrets).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
@@ -88,4 +102,8 @@ pub struct Post {
     pub delete_at: i64,
     #[serde(default)]
     pub file_ids: Vec<String>,
+    /// Populated by the bridge after resolving user_id via /users/ids.
+    /// Skipped during deserialization from Mattermost API.
+    #[serde(default, skip_deserializing)]
+    pub user_display_name: String,
 }

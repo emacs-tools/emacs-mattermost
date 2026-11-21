@@ -84,6 +84,33 @@ impl MattermostClient {
         Ok(user)
     }
 
+    /// Batch-fetch users by their IDs. Mattermost limit is 1000 per request.
+    pub async fn get_users_by_ids(
+        &self,
+        token: &str,
+        user_ids: &[String],
+    ) -> Result<Vec<User>, ClientError> {
+        if user_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let url = format!("{}/api/v4/users/ids", self.base_url);
+        let response = self
+            .client
+            .post(&url)
+            .header(AUTHORIZATION, format!("Bearer {}", token))
+            .json(user_ids)
+            .send()
+            .await
+            .map_err(ClientError::Http)?;
+
+        if !response.status().is_success() {
+            return Err(api_error(response).await);
+        }
+
+        let users: Vec<User> = response.json().await.map_err(ClientError::Http)?;
+        Ok(users)
+    }
+
     pub async fn get_teams(&self, token: &str) -> Result<Vec<mm_core::Team>, ClientError> {
         let url = format!("{}/api/v4/users/me/teams", self.base_url);
         let response = self

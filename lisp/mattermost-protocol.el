@@ -15,7 +15,7 @@
 (defun mattermost-connect-to-bridge ()
   "Connect to the running Rust bridge."
   (interactive)
-  (when (and mattermost--process (process-live-p mattermost--process))
+  (when (and (boundp 'mattermost--process) mattermost--process (process-live-p mattermost--process))
     (delete-process mattermost--process))
   
   (setq mattermost--process
@@ -46,7 +46,8 @@
       (setq lines (butlast lines)))
     
     (dolist (line lines)
-      (let ((msg (ignore-errors (json-parse-string line :object-type 'plist))))
+      ;; ДОБАВЛЕНО: :array-type 'list чтобы JSON-массивы становились списками, а не векторами
+      (let ((msg (ignore-errors (json-parse-string line :object-type 'plist :array-type 'list))))
         (if msg
             (let ((id (plist-get msg :id))
                   (type (plist-get msg :type)))

@@ -95,13 +95,18 @@
 - [x] Bridge methods verified via smoke tests.
 - [x] Post model includes file_ids.
 
-## Phase 4b — Emacs UI (pending)
+## Phase 4b — Emacs UI
 
-- [ ] Connect Emacs to bridge over TCP.
-- [ ] Open self-DM buffer.
-- [ ] Display raw messages.
-- [ ] Send message from Emacs.
-- [ ] Receive own message online.
+- [x] Connect Emacs to bridge over TCP.
+- [x] Interactive connection prompt (password in memory only).
+- [x] Dashboard buffer with channel list (`mattermost-dashboard-mode`).
+- [x] Open channel buffer from dashboard.
+- [x] Display raw message history in channel buffer.
+- [x] Send message from channel buffer (`C-c C-s`).
+- [x] Refresh channel history (`g`).
+- [x] Reset connection state (`mattermost-reset-state`).
+- [ ] Receive own message online (WebSocket fan-out).
+- [ ] Resolve DM channel display names (currently shows empty).
 
 ## Phase 5 — WebSocket online updates
 
@@ -127,12 +132,13 @@
 
 ## Phase 7 — channels
 
-- [ ] Implement list_channels.
-- [ ] Channel list buffer.
-- [ ] Open channel buffer, load history, send message.
-- [ ] Channel events online.
+- [x] Implement list_channels (Rust backend).
+- [x] Channel list buffer (Emacs UI).
+- [x] Open channel buffer, load history, send message.
+- [ ] Channel events online (WebSocket fan-out).
 - [ ] Implement mark_read.
-- [ ] Forced refresh with g.
+- [ ] Resolve DM channel display names.
+- [ ] Forced refresh with g (basic refresh works, full recovery pending).
 
 ## Phase 8 — TLS/self-signed support
 

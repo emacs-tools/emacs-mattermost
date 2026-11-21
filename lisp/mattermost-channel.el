@@ -14,7 +14,7 @@
   "Major mode for viewing a Mattermost channel.
 \\{mattermost-channel-mode-map}"
   (setq buffer-read-only t)
-  (setq truncate-lines t))
+  (setq truncate-lines nil))
 
 (defvar-local mattermost--channel-id nil
   "Channel ID for the current buffer.")
@@ -55,6 +55,18 @@
             (plist-get (plist-get response :result) :posts))
          (message "[MM] Failed to load history: %S" (plist-get response :error)))))))
 
+(defun mattermost--format-post (post)
+  "Format a POST plist for display with multi-line support."
+  (let* ((msg-text (or (plist-get post :message) ""))
+         (create-at (plist-get post :create_at))
+         (time-str (if create-at
+                       (format-time-string "%Y-%m-%d %H:%M" (seconds-to-time (/ create-at 1000)))
+                     "????-??-?? ??:??"))
+         (sender (or (plist-get post :user_display_name)
+                     (plist-get post :user_id)
+                     "unknown")))
+    (format "[%s] **%s:**\n%s\n" time-str sender msg-text)))
+
 (defun mattermost--render-channel-history (channel-name posts)
   "Render POSTS in the current channel buffer with CHANNEL-NAME."
   (let ((inhibit-read-only t))
@@ -63,18 +75,9 @@
     (insert "========================================\n\n")
     
     (dolist (post posts)
-      (let* ((msg-text (or (plist-get post :message) ""))
-             (create-at (plist-get post :create_at))
-             (time-str (if create-at
-                           (format-time-string "%H:%M" (seconds-to-time (/ create-at 1000)))
-                         "??:??"))
-             ;; Используем user_display_name, если есть, иначе user_id
-             (sender (or (plist-get post :user_display_name)
-                         (plist-get post :user_id)
-                         "unknown")))
-        (insert (format "[%s] %s: %s\n" time-str sender msg-text))))
+      (insert (mattermost--format-post post))
+      (insert "\n")) ; Пустая строка между сообщениями
     
-    (insert "\n")
     (goto-char (point-max))))
 
 (defun mattermost-channel-refresh ()
@@ -107,22 +110,15 @@ The message will appear automatically via WebSocket fan-out; no refresh needed."
 (defun mattermost-channel-on-posted (params)
   "Handle a 'posted' event. PARAMS should contain the 'post' plist."
   (let* ((post (plist-get params :post))
-         (channel-id (plist-get post :channel_id))
-         (msg-text (or (plist-get post :message) ""))
-         (create-at (plist-get post :create_at))
-         (time-str (if create-at
-                       (format-time-string "%H:%M" (seconds-to-time (/ create-at 1000)))
-                     "??:??"))
-         (sender (or (plist-get post :user_display_name)
-                     (plist-get post :user_id)
-                     "unknown")))
+         (channel-id (plist-get post :channel_id)))
     (dolist (buf (buffer-list))
       (with-current-buffer buf
         (when (and (eq major-mode 'mattermost-channel-mode)
                    (string= mattermost--channel-id channel-id))
           (let ((inhibit-read-only t))
             (goto-char (point-max))
-            (insert (format "[%s] %s: %s\n" time-str sender msg-text))
+            (insert (mattermost--format-post post))
+            (insert "\n") ; Пустая строка между сообщениями
             (when (= (point) (point-max))
               (goto-char (point-max)))))))))
 

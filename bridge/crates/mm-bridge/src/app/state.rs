@@ -1,7 +1,9 @@
 use mm_client::ws::WsConnection;
+use mm_client::MattermostClient;
 use mm_core::{BridgeError, ErrorKind, ServerId, User};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
@@ -22,7 +24,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
-        let (tx, _) = broadcast::channel(100); // Буфер до 100 событий
+        let (tx, _) = broadcast::channel(100);
         Self {
             connections: Arc::new(Mutex::new(HashMap::new())),
             event_tx: tx,
@@ -51,6 +53,17 @@ impl AppState {
         let sid = server_id.clone();
         let event_tx = self.event_tx.clone();
 
+        // Создаём клиент для резолвинга имён в WS-событиях
+        let ca_path = state.ca_file.as_ref().map(PathBuf::from);
+        let client = match MattermostClient::new(state.url.clone(), ca_path.as_deref()) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(server_id = %sid, "Failed to create client for WS: {}", e);
+                return Err(BridgeError::new(ErrorKind::InternalError, e.to_string()));
+            }
+        };
+        let token = state.token.clone();
+
         tokio::spawn(async move {
             match WsConnection::new(&state.url, &state.token).await {
                 Ok(mut ws) => {
@@ -58,20 +71,34 @@ impl AppState {
                     loop {
                         match ws.next_event().await {
                             Ok(Some(event_data)) => {
-                                // Пытаемся распарсить и нормализовать событие 'posted'
                                 if let Ok(json_val) = serde_json::from_str::<Value>(&event_data) {
                                     if let Some(event_type) =
                                         json_val.get("event").and_then(|v| v.as_str())
                                     {
                                         if event_type == "posted" {
                                             if let Some(data) = json_val.get("data") {
-                                                // Mattermost присылает post как строку, содержащую JSON
                                                 if let Some(post_str) =
                                                     data.get("post").and_then(|v| v.as_str())
                                                 {
-                                                    if let Ok(post_obj) =
+                                                    if let Ok(mut post_obj) =
                                                         serde_json::from_str::<Value>(post_str)
                                                     {
+                                                        // Резолвим имя отправителя
+                                                        if let Some(user_id) = post_obj
+                                                            .get("user_id")
+                                                            .and_then(|v| v.as_str())
+                                                        {
+                                                            if let Ok(user) = client
+                                                                .get_user(&token, user_id)
+                                                                .await
+                                                            {
+                                                                post_obj["user_display_name"] =
+                                                                    Value::String(
+                                                                        user.display_name(),
+                                                                    );
+                                                            }
+                                                        }
+
                                                         let normalized = serde_json::json!({
                                                             "type": "event",
                                                             "method": "posted",
@@ -79,7 +106,6 @@ impl AppState {
                                                                 "post": post_obj
                                                             }
                                                         });
-                                                        // Игнорируем ошибку, если нет подписчиков (Emacs отключён)
                                                         let _ = event_tx.send(normalized);
                                                     }
                                                 }

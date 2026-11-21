@@ -96,8 +96,11 @@ pub struct Channel {
 /// File metadata attached to a post.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileInfo {
+    #[serde(default)]
     pub id: String,
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub size: i64,
     #[serde(default)]
     pub mime_type: String,

@@ -10,8 +10,8 @@
   "Last channel list rendered in this buffer.")
 (defvar mattermost--teams nil
   "Last team list rendered in this buffer.")
-(defvar-local mattermost--collapsed-teams nil
-  "List of team IDs that are currently collapsed in this buffer.")
+(defvar mattermost--collapsed-teams nil
+  "List of team IDs currently collapsed in the dashboard.")
 
 (defvar mattermost-dashboard-mode-map
   (let ((map (make-sparse-keymap)))
@@ -39,7 +39,7 @@ S-TAB (backtab) collapses/expands all sections."
   (setq mattermost--process nil)
   (setq mattermost--pending-requests (make-hash-table :test 'equal))
   (setq mattermost--input-buffer "")
-  ;; Удаляем буфер дашборда, чтобы сбросить локальные переменные
+  (setq mattermost--collapsed-teams nil)
   (when (get-buffer "*Mattermost Dashboard*")
     (kill-buffer "*Mattermost Dashboard*"))
   (message "[MM] State reset complete."))
@@ -92,7 +92,7 @@ S-TAB (backtab) collapses/expands all sections."
        (message "[MM] list_channels failed: %S" (plist-get response :error))))))
 
 (defun mattermost--insert-team-header (title)
-  "Insert a section header TITLE with collapse marker. Returns (start . end)."
+  "Insert a section header TITLE with collapse marker.  Return (start . end)."
   (let ((start (point)))
     (insert (format "%s ▼\n" title))
     (put-text-property start (point) 'face 'mattermost-sender-face)
@@ -111,18 +111,35 @@ S-TAB (backtab) collapses/expands all sections."
                         'mouse-face 'highlight))))
 
 (defun mattermost--sort-channels-by-activity (channels)
-  "Sort CHANNELS by last_post_at descending (most recent first)."
+  "Sort CHANNELS by last_post_at descending."
   (sort channels
         (lambda (a b)
           (> (or (plist-get a :last_post_at) 0)
              (or (plist-get b :last_post_at) 0)))))
 
 (defun mattermost--set-header-marker (start end marker)
-  "Replace the collapse marker in range START..END with MARKER."
+  "Replace the collapse marker between START and END with MARKER.
+Caller must bind `inhibit-read-only'."
   (save-excursion
     (goto-char start)
     (when (re-search-forward "[▼▶]" end t)
-      (replace-match marker))))
+      (replace-match marker t t))))
+
+(defun mattermost--collapse-section (overlay collapse)
+  "Set COLLAPSE state on section OVERLAY and update its header marker."
+  (let ((inhibit-read-only t)
+        (team-id (overlay-get overlay 'mm-team-id)))
+    (overlay-put overlay 'invisible (and collapse 'mm-section))
+    (mattermost--set-header-marker
+     (overlay-get overlay 'mm-header-start)
+     (overlay-get overlay 'mm-header-end)
+     (if collapse "▶" "▼"))
+    (if collapse
+        (unless (member team-id mattermost--collapsed-teams)
+          (setq mattermost--collapsed-teams
+                (cons team-id mattermost--collapsed-teams)))
+      (setq mattermost--collapsed-teams
+            (delete team-id mattermost--collapsed-teams)))))
 
 (defun mattermost-dashboard-toggle-section ()
   "Toggle visibility of the section whose header is at point."
@@ -130,26 +147,14 @@ S-TAB (backtab) collapses/expands all sections."
   (let ((overlay (get-text-property (point) 'mm-section-overlay)))
     (if (not overlay)
         (message "[MM] Not on a team header.")
-      (let* ((collapsed (overlay-get overlay 'invisible))
-             (header-start (overlay-get overlay 'mm-header-start))
-             (header-end (overlay-get overlay 'mm-header-end))
-             (team-id (overlay-get overlay 'mm-team-id)))
-        (if collapsed
-            (progn
-              (overlay-put overlay 'invisible nil)
-              (mattermost--set-header-marker header-start header-end "▼")
-              (setq mattermost--collapsed-teams
-                    (delete team-id mattermost--collapsed-teams)))
-          (overlay-put overlay 'invisible 'mm-section)
-          (mattermost--set-header-marker header-start header-end "▶")
-          (unless (member team-id mattermost--collapsed-teams)
-            (push team-id mattermost--collapsed-teams)))))))
+      (mattermost--collapse-section overlay (not (overlay-get overlay 'invisible)))
+      (message "[MM-DEBUG] collapsed-teams=%S" mattermost--collapsed-teams))))
 
 (defun mattermost-dashboard-toggle-all ()
   "Collapse or expand all team sections."
   (interactive)
-  (let ((any-expanded nil)
-        (overlays '()))
+  (let ((overlays nil)
+        (any-expanded nil))
     (save-excursion
       (goto-char (point-min))
       (while (not (eobp))
@@ -160,47 +165,44 @@ S-TAB (backtab) collapses/expands all sections."
               (setq any-expanded t))))
         (forward-line 1)))
     (dolist (ov overlays)
-      (let ((header-start (overlay-get ov 'mm-header-start))
-            (header-end (overlay-get ov 'mm-header-end))
-            (team-id (overlay-get ov 'mm-team-id)))
-        (if any-expanded
-            (progn
-              (overlay-put ov 'invisible 'mm-section)
-              (mattermost--set-header-marker header-start header-end "▶")
-              (unless (member team-id mattermost--collapsed-teams)
-                (push team-id mattermost--collapsed-teams)))
-          (overlay-put ov 'invisible nil)
-          (mattermost--set-header-marker header-start header-end "▼")
-          (setq mattermost--collapsed-teams
-                (delete team-id mattermost--collapsed-teams)))))))
+      (mattermost--collapse-section ov any-expanded))
+    (message "[MM-DEBUG] collapsed-teams=%S" mattermost--collapsed-teams)))
+
+(defun mattermost--insert-section (title team-id channels)
+  "Insert section TITLE for TEAM-ID with CHANNELS, honouring collapse state."
+  (let* ((header (mattermost--insert-team-header title))
+         (section-start (point)))
+    (dolist (ch channels)
+      (mattermost--insert-channel-line ch))
+    (let ((ov (make-overlay section-start (point))))
+      (overlay-put ov 'mm-header-start (car header))
+      (overlay-put ov 'mm-header-end (cdr header))
+      (overlay-put ov 'mm-team-id team-id)
+      (put-text-property (car header) (cdr header) 'mm-section-overlay ov)
+      (when (member team-id mattermost--collapsed-teams)
+        (overlay-put ov 'invisible 'mm-section)
+        (mattermost--set-header-marker (car header) (cdr header) "▶")))))
 
 (defun mattermost--render-dashboard (server-id channels teams)
   "Render CHANNELS grouped by TEAMS for SERVER-ID, preserving collapse state."
-  (let* ((buf (get-buffer-create "*Mattermost Dashboard*"))
-         ;; Сохраняем текущее состояние свёрнутости перед перерисовкой
-         (saved-collapsed (if (buffer-live-p buf)
-                              (with-current-buffer buf mattermost--collapsed-teams)
-                            nil))
-         (by-team (make-hash-table :test 'equal))
-         (dms nil))
+  (message "[MM-DEBUG] Rendering: collapsed-teams=%S" mattermost--collapsed-teams)
+  (let ((by-team (make-hash-table :test 'equal))
+        (dms nil)
+        (buf (get-buffer-create "*Mattermost Dashboard*")))
     (setq channels (mattermost--sort-channels-by-activity channels))
     (dolist (ch channels)
-      (let ((type (plist-get ch :type)))
-        (if (member type '("D" "G"))
-            (push ch dms)
-          (let* ((tid (or (plist-get ch :team_id) ""))
-                 (prev (gethash tid by-team)))
-            (puthash tid (cons ch prev) by-team)))))
+      (if (member (plist-get ch :type) '("D" "G"))
+          (push ch dms)
+        (let* ((tid (or (plist-get ch :team_id) ""))
+               (prev (gethash tid by-team)))
+          (puthash tid (cons ch prev) by-team))))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
-        ;; mattermost-dashboard-mode вызывает kill-all-local-variables,
-        ;; поэтому сохраняем и восстанавливаем состояние свёрнутости
         (mattermost-dashboard-mode)
         (erase-buffer)
         (setq-local mattermost--current-server-id server-id)
         (setq-local mattermost--channels channels)
         (setq-local mattermost--teams teams)
-        (setq-local mattermost--collapsed-teams saved-collapsed)
         (insert "Mattermost channels    RET open · TAB toggle · g refresh\n\n")
         (let ((rendered (make-hash-table :test 'equal)))
           (dolist (team teams)
@@ -208,56 +210,19 @@ S-TAB (backtab) collapses/expands all sections."
                    (chs (gethash tid by-team)))
               (when chs
                 (puthash tid t rendered)
-                (let* ((header-range (mattermost--insert-team-header
-                                      (plist-get team :display_name)))
-                       (section-start (point)))
-                  (dolist (ch (nreverse chs))
-                    (mattermost--insert-channel-line ch))
-                  (let ((ov (make-overlay section-start (point))))
-                    (overlay-put ov 'mm-header-start (car header-range))
-                    (overlay-put ov 'mm-header-end (cdr header-range))
-                    (overlay-put ov 'mm-team-id tid)
-                    (put-text-property (car header-range) (cdr header-range)
-                                       'mm-section-overlay ov)
-                    ;; Восстанавливаем состояние свёрнутости
-                    (when (member tid saved-collapsed)
-                      (overlay-put ov 'invisible 'mm-section)
-                      (mattermost--set-header-marker
-                       (car header-range) (cdr header-range) "▶")))))))
+                (mattermost--insert-section
+                 (plist-get team :display_name) tid (nreverse chs))
+                (insert "\n"))))
           (maphash
            (lambda (tid chs)
              (unless (gethash tid rendered)
-               (let* ((header-range (mattermost--insert-team-header
-                                     (if (string-empty-p tid) "Other" tid)))
-                      (section-start (point)))
-                 (dolist (ch (nreverse chs))
-                   (mattermost--insert-channel-line ch))
-                 (let ((ov (make-overlay section-start (point))))
-                   (overlay-put ov 'mm-header-start (car header-range))
-                   (overlay-put ov 'mm-header-end (cdr header-range))
-                   (overlay-put ov 'mm-team-id tid)
-                   (put-text-property (car header-range) (cdr header-range)
-                                      'mm-section-overlay ov)
-                   (when (member tid saved-collapsed)
-                     (overlay-put ov 'invisible 'mm-section)
-                     (mattermost--set-header-marker
-                      (car header-range) (cdr header-range) "▶"))))))
+               (mattermost--insert-section
+                (if (string-empty-p tid) "Other" tid) tid (nreverse chs))
+               (insert "\n")))
            by-team))
         (when dms
-          (let* ((header-range (mattermost--insert-team-header "Direct messages"))
-                 (section-start (point)))
-            (dolist (ch (nreverse dms))
-              (mattermost--insert-channel-line ch))
-            (let ((ov (make-overlay section-start (point))))
-              (overlay-put ov 'mm-header-start (car header-range))
-              (overlay-put ov 'mm-header-end (cdr header-range))
-              (overlay-put ov 'mm-team-id "dms")
-              (put-text-property (car header-range) (cdr header-range)
-                                 'mm-section-overlay ov)
-              (when (member "dms" saved-collapsed)
-                (overlay-put ov 'invisible 'mm-section)
-                (mattermost--set-header-marker
-                 (car header-range) (cdr header-range) "▶")))))
+          (mattermost--insert-section "Direct messages" "dms" (nreverse dms))
+          (insert "\n"))
         (goto-char (point-min))))
     (switch-to-buffer buf)))
 

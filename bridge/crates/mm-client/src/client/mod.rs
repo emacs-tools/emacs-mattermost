@@ -34,8 +34,7 @@ impl MattermostClient {
             .map_err(ClientError::Http)?;
 
         if !response.status().is_success() {
-            let err = api_error(response).await;
-            return Err(err);
+            return Err(api_error(response).await);
         }
 
         let token = response
@@ -84,6 +83,7 @@ impl MattermostClient {
         Ok(user)
     }
 
+    /// Batch-fetch users by their IDs.
     pub async fn get_users_by_ids(
         &self,
         token: &str,
@@ -174,6 +174,7 @@ impl MattermostClient {
         Ok(ChannelId::new(ch.id))
     }
 
+    /// Get posts for a channel. `before` = oldest known post id for pagination.
     pub async fn get_posts(
         &self,
         token: &str,
@@ -220,6 +221,9 @@ impl MattermostClient {
     }
 
     /// Fetch file metadata for a post.
+    ///
+    /// Mattermost has returned different shapes for this endpoint across
+    /// versions, so the body is parsed tolerantly and logged on debug.
     pub async fn get_post_files(
         &self,
         token: &str,
@@ -238,14 +242,22 @@ impl MattermostClient {
             return Err(api_error(response).await);
         }
 
-        #[derive(serde::Deserialize)]
-        struct FilesResponse {
-            #[serde(default)]
-            file_infos: Vec<FileInfo>,
-        }
+        let body = response.text().await.map_err(ClientError::Http)?;
+        let prefix: String = body.chars().take(300).collect();
+        tracing::debug!(post_id, body = %prefix, "files/info raw response");
 
-        let data: FilesResponse = response.json().await.map_err(ClientError::Http)?;
-        Ok(data.file_infos)
+        let value: serde_json::Value =
+            serde_json::from_str(&body).map_err(|e| ClientError::Api {
+                id: "decode_error".to_string(),
+                message: format!("{e}; body prefix: {prefix}"),
+                status_code: 200,
+            })?;
+
+        let files = parse_file_infos(&value);
+        if files.is_empty() {
+            tracing::debug!(post_id, body = %prefix, "files/info parsed to zero files");
+        }
+        Ok(files)
     }
 
     pub async fn create_post(
@@ -281,6 +293,50 @@ impl MattermostClient {
 
         let post: Post = response.json().await.map_err(ClientError::Http)?;
         Ok(post)
+    }
+}
+
+/// Accept `[fileinfo, ...]`, `{file_infos: [...]}`, or
+/// `{order: [...], file_infos: {id: fileinfo}}`.
+fn parse_file_infos(value: &serde_json::Value) -> Vec<FileInfo> {
+    fn many(items: &[serde_json::Value]) -> Vec<FileInfo> {
+        items
+            .iter()
+            .filter_map(|v| serde_json::from_value::<FileInfo>(v.clone()).ok())
+            .collect()
+    }
+
+    match value {
+        serde_json::Value::Array(items) => many(items),
+        serde_json::Value::Object(map) => {
+            let order: Vec<String> = map
+                .get("order")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            match map.get("file_infos") {
+                Some(serde_json::Value::Array(items)) => many(items),
+                Some(serde_json::Value::Object(infos)) => {
+                    if order.is_empty() {
+                        many(&infos.values().cloned().collect::<Vec<_>>())
+                    } else {
+                        let items: Vec<serde_json::Value> = order
+                            .iter()
+                            .filter_map(|id| infos.get(id))
+                            .cloned()
+                            .collect();
+                        many(&items)
+                    }
+                }
+                _ => Vec::new(),
+            }
+        }
+        _ => Vec::new(),
     }
 }
 

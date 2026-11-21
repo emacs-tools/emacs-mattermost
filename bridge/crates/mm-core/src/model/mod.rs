@@ -93,6 +93,16 @@ pub struct Channel {
     pub last_post_at: i64,
 }
 
+/// File metadata attached to a post.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileInfo {
+    pub id: String,
+    pub name: String,
+    pub size: i64,
+    #[serde(default)]
+    pub mime_type: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Post {
     pub id: PostId,
@@ -108,4 +118,7 @@ pub struct Post {
     /// Populated by the bridge after resolving user_id via /users/ids.
     #[serde(default, skip_deserializing)]
     pub user_display_name: String,
+    /// Populated by the bridge after fetching file metadata.
+    #[serde(default, skip_deserializing)]
+    pub files: Vec<FileInfo>,
 }

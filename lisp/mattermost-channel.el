@@ -55,8 +55,16 @@
             (plist-get (plist-get response :result) :posts))
          (message "[MM] Failed to load history: %S" (plist-get response :error)))))))
 
+(defun mattermost--format-file-size (bytes)
+  "Format BYTES as human-readable size."
+  (cond
+   ((< bytes 1024) (format "%d B" bytes))
+   ((< bytes (* 1024 1024)) (format "%.1f KB" (/ bytes 1024.0)))
+   ((< bytes (* 1024 1024 1024)) (format "%.1f MB" (/ bytes (* 1024.0 1024.0))))
+   (t (format "%.1f GB" (/ bytes (* 1024.0 1024.0 1024.0))))))
+
 (defun mattermost--format-post (post)
-  "Format a POST plist for display with multi-line support and bold sender."
+  "Format a POST plist for display with multi-line support, bold sender, and files."
   (let* ((msg-text (or (plist-get post :message) ""))
          (create-at (plist-get post :create_at))
          (time-str (if create-at
@@ -64,11 +72,26 @@
                      "????-??-?? ??:??"))
          (sender (or (plist-get post :user_display_name)
                      (plist-get post :user_id)
-                     "unknown")))
+                     "unknown"))
+         (files (plist-get post :files))
+         (has-content (or (not (string-empty-p msg-text)) files)))
+    (unless has-content
+      (setq msg-text "[empty message]"))
     (concat
      (format "[%s] **" time-str)
      (propertize sender 'face 'mattermost-sender-face)
-     (format ":**\n%s\n" msg-text))))
+     (format ":**\n%s"
+             (if (string-empty-p msg-text) "" (concat msg-text "\n")))
+     (when files
+       (mapconcat
+        (lambda (f)
+          (let* ((name (or (plist-get f :name) "unknown"))
+                 (size (or (plist-get f :size) 0))
+                 (id (plist-get f :id)))
+            (format "  📎 %s (%s)\n" name (mattermost--format-file-size size))))
+        files
+        ""))
+     "\n")))
 
 (defun mattermost--render-channel-history (channel-name posts)
   "Render POSTS in the current channel buffer with CHANNEL-NAME."
@@ -79,7 +102,7 @@
     
     (dolist (post posts)
       (insert (mattermost--format-post post))
-      (insert "\n")) ; Пустая строка между сообщениями
+      (insert "\n"))
     
     (goto-char (point-max))))
 
@@ -121,7 +144,7 @@ The message will appear automatically via WebSocket fan-out; no refresh needed."
           (let ((inhibit-read-only t))
             (goto-char (point-max))
             (insert (mattermost--format-post post))
-            (insert "\n") ; Пустая строка между сообщениями
+            (insert "\n")
             (when (= (point) (point-max))
               (goto-char (point-max)))))))))
 

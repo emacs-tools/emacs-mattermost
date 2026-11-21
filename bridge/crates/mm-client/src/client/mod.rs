@@ -1,6 +1,6 @@
 use crate::error::ClientError;
 use crate::tls;
-use mm_core::{Channel, ChannelId, Post, User};
+use mm_core::{Channel, ChannelId, FileInfo, Post, User};
 use reqwest::header::AUTHORIZATION;
 use std::path::Path;
 
@@ -84,7 +84,6 @@ impl MattermostClient {
         Ok(user)
     }
 
-    /// Batch-fetch users by their IDs. Mattermost limit is 1000 per request.
     pub async fn get_users_by_ids(
         &self,
         token: &str,
@@ -218,6 +217,35 @@ impl MattermostClient {
 
         posts.sort_by_key(|p| p.create_at);
         Ok(posts)
+    }
+
+    /// Fetch file metadata for a post.
+    pub async fn get_post_files(
+        &self,
+        token: &str,
+        post_id: &str,
+    ) -> Result<Vec<FileInfo>, ClientError> {
+        let url = format!("{}/api/v4/posts/{}/files/info", self.base_url, post_id);
+        let response = self
+            .client
+            .get(&url)
+            .header(AUTHORIZATION, format!("Bearer {}", token))
+            .send()
+            .await
+            .map_err(ClientError::Http)?;
+
+        if !response.status().is_success() {
+            return Err(api_error(response).await);
+        }
+
+        #[derive(serde::Deserialize)]
+        struct FilesResponse {
+            #[serde(default)]
+            file_infos: Vec<FileInfo>,
+        }
+
+        let data: FilesResponse = response.json().await.map_err(ClientError::Http)?;
+        Ok(data.file_infos)
     }
 
     pub async fn create_post(

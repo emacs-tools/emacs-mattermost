@@ -1,10 +1,11 @@
-use crate::app::state::{AppState, ConnectionState};
+mod enrich;
+mod helpers;
+
+use crate::app::state::AppState;
 use crate::protocol;
-use mm_client::MattermostClient;
-use mm_core::{BridgeError, Channel, ErrorKind, Post, ServerConfig, ServerId, User};
-use mm_store::{ServerStore, TokenStore};
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use helpers::*;
+use mm_core::Post;
+use std::path::Path;
 
 pub async fn handle_connect(
     app_state: &AppState,
@@ -40,8 +41,8 @@ pub async fn handle_connect(
     } else if let Some(token) = params.get("token").and_then(|v| v.as_str()) {
         Ok(token.to_string())
     } else {
-        Err(BridgeError::new(
-            ErrorKind::InvalidRequest,
+        Err(mm_core::BridgeError::new(
+            mm_core::ErrorKind::InvalidRequest,
             "provide credentials or token",
         ))
     };
@@ -56,7 +57,7 @@ pub async fn handle_connect(
                 Ok(user) => {
                     app_state.add_connection(
                         server_id.clone(),
-                        ConnectionState {
+                        crate::app::state::ConnectionState {
                             user: user.clone(),
                             token: token.clone(),
                             url: url.clone(),
@@ -159,13 +160,11 @@ pub async fn handle_list_channels(
         Err(e) => return protocol::Response::err(request.id, e),
     };
 
-    // Получаем каналы и команды параллельно
     let channels_result = client.get_my_channels(&token).await;
     let teams_result = client.get_teams(&token).await;
 
     match (channels_result, teams_result) {
         (Ok(mut channels), Ok(teams)) => {
-            // Резолвим имена для DM-каналов
             for ch in &mut channels {
                 if ch.channel_type == "D" && ch.display_name.is_empty() {
                     let parts: Vec<&str> = ch.name.split("__").collect();
@@ -267,8 +266,8 @@ pub async fn handle_get_history(
 
     match client.get_posts(&token, channel_id, limit, before).await {
         Ok(mut posts) => {
-            // Обогащаем посты именами отправителей
-            enrich_posts_with_display_names(&client, &token, &mut posts).await;
+            enrich::enrich_posts_with_display_names(&client, &token, &mut posts).await;
+            enrich::enrich_posts_with_files(&client, &token, &mut posts).await;
 
             protocol::Response::ok(
                 request.id,
@@ -281,44 +280,6 @@ pub async fn handle_get_history(
             )
         }
         Err(e) => protocol::Response::err(request.id, e.into()),
-    }
-}
-
-/// Batch-resolve user_ids in posts to human-readable display names.
-async fn enrich_posts_with_display_names(
-    client: &MattermostClient,
-    token: &str,
-    posts: &mut [Post],
-) {
-    // Собираем уникальные user_id
-    let unique_ids: Vec<String> = posts
-        .iter()
-        .map(|p| p.user_id.0.clone())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-
-    if unique_ids.is_empty() {
-        return;
-    }
-
-    // Batch-запрос профилей
-    match client.get_users_by_ids(token, &unique_ids).await {
-        Ok(users) => {
-            let name_map: HashMap<String, String> = users
-                .into_iter()
-                .map(|u| (u.id.0.clone(), u.display_name()))
-                .collect();
-
-            for post in posts.iter_mut() {
-                if let Some(name) = name_map.get(&post.user_id.0) {
-                    post.user_display_name = name.clone();
-                }
-            }
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "Failed to resolve user display names, falling back to IDs");
-        }
     }
 }
 
@@ -364,78 +325,4 @@ pub async fn handle_send_post(
         ),
         Err(e) => protocol::Response::err(request.id, e.into()),
     }
-}
-
-// --- Helpers ---
-
-fn protocol_err(id: impl Into<String>, msg: &str) -> protocol::Response {
-    protocol::Response::err(id, BridgeError::new(ErrorKind::InvalidRequest, msg))
-}
-
-fn get_server_id(params: &serde_json::Map<String, serde_json::Value>) -> ServerId {
-    params
-        .get("server_id")
-        .and_then(|v| v.as_str())
-        .map(ServerId::new)
-        .unwrap_or_else(|| ServerId::new("default"))
-}
-
-fn get_client(app_state: &AppState, server_id: &ServerId) -> Result<MattermostClient, BridgeError> {
-    let state = app_state.get_connection(server_id)?;
-    let ca_path = state.ca_file.as_ref().map(PathBuf::from);
-    MattermostClient::new(state.url, ca_path.as_deref())
-        .map_err(|e| BridgeError::new(ErrorKind::InternalError, e.to_string()))
-}
-
-fn get_token(app_state: &AppState, server_id: &ServerId) -> Result<String, BridgeError> {
-    app_state.get_connection(server_id).map(|s| s.token.clone())
-}
-
-fn get_user_id(app_state: &AppState, server_id: &ServerId) -> Result<mm_core::UserId, BridgeError> {
-    app_state
-        .get_connection(server_id)
-        .map(|s| s.user.id.clone())
-}
-
-async fn do_login(
-    url: &str,
-    login: &str,
-    pass: &str,
-    ca: Option<&str>,
-) -> Result<String, BridgeError> {
-    let ca_path = ca.map(PathBuf::from);
-    let client = MattermostClient::new(url.to_string(), ca_path.as_deref())
-        .map_err(|e| BridgeError::new(ErrorKind::InternalError, e.to_string()))?;
-    client.login(login, pass).await.map_err(Into::into)
-}
-
-async fn do_get_me(url: &str, token: &str, ca: Option<&str>) -> Result<User, BridgeError> {
-    let ca_path = ca.map(PathBuf::from);
-    let client = MattermostClient::new(url.to_string(), ca_path.as_deref())
-        .map_err(|e| BridgeError::new(ErrorKind::InternalError, e.to_string()))?;
-    client.get_me(token).await.map_err(Into::into)
-}
-
-fn save_token_and_config(
-    data_dir: &Path,
-    server_id: &ServerId,
-    token: &str,
-    url: &str,
-) -> Result<(), protocol::Response> {
-    let token_store = TokenStore::new(data_dir);
-    let server_store = ServerStore::new(data_dir);
-
-    token_store
-        .save(server_id, token)
-        .map_err(|e| protocol::Response::err("req", e))?;
-
-    let config = ServerConfig {
-        server_id: server_id.clone(),
-        url: url.to_string(),
-    };
-    server_store
-        .save(&config)
-        .map_err(|e| protocol::Response::err("req", e))?;
-
-    Ok(())
 }

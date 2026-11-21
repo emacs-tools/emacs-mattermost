@@ -4,38 +4,37 @@
 (require 'mattermost-protocol)
 (require 'mattermost-files)
 
-(defvar mattermost--draft-map
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map global-map)
-    (define-key map (kbd "RET") #'mattermost-channel-send-message)
-    (define-key map (kbd "C-c C-c") #'mattermost-channel-send-message)
-    (define-key map (kbd "C-c C-s") #'mattermost-channel-send-message)
-    map)
-  "Keymap active while point is inside the draft.
-Parent is `global-map', so printable characters self-insert and motion
-keys work; mode-specific single-key bindings (g, h, q, ...) are shadowed.")
-
 (defvar mattermost-channel-mode-map
   (let ((map (make-sparse-keymap)))
+    ;; Отцепляемся от special-mode-map, чтобы его одиночные клавиши
+    ;; (space, DEL, g, q, h, ...) не мешали набору текста в черновике.
+    (set-keymap-parent map nil)
     (define-key map (kbd "RET") #'mattermost-channel-ret)
+    (define-key map (kbd "SPC") #'mattermost-channel-space)
+    (define-key map (kbd "DEL") #'mattermost-channel-backspace)
+    (define-key map "g" #'mattermost-channel-g)
+    (define-key map "q" #'mattermost-channel-q)
+    (define-key map "h" #'mattermost-channel-h)
+    (define-key map "?" #'mattermost-channel-h)
     (define-key map (kbd "C-c C-c") #'mattermost-channel-send-message)
     (define-key map (kbd "C-c C-s") #'mattermost-channel-send-message)
-    (define-key map (kbd "g") #'mattermost-channel-refresh)
+    (define-key map [remap self-insert-command] #'mattermost-channel-self-insert)
     map)
-  "Keymap for `mattermost-channel-mode' (history area).")
+  "Keymap for `mattermost-channel-mode'.
+Single-key commands are context wrappers: they type in the draft and
+act on history otherwise.")
 
 (define-derived-mode mattermost-channel-mode special-mode "Mattermost-Channel"
   "Major mode for viewing and writing in a Mattermost channel.
 History above the \"> \" prompt is protected by a local before-change
-hook; the draft after the prompt is editable and pinned to the bottom.
-While point is in the draft, `mattermost--draft-map' overrides mode
-bindings so any text can be typed.
+hook; the draft after the prompt is editable and kept at buffer end.
 \\{mattermost-channel-mode-map}"
   (setq buffer-read-only nil)
   (setq truncate-lines nil)
-  (add-hook 'before-change-functions #'mattermost--protect-history nil t)
-  (add-hook 'window-scroll-functions #'mattermost--clamp-window nil t)
-  (add-hook 'post-command-hook #'mattermost--update-draft-keymap nil t))
+  ;; Построчная прокрутка стрелками, без перекидывания экрана
+  (setq-local scroll-conservatively 101)
+  (setq-local scroll-margin 0)
+  (add-hook 'before-change-functions #'mattermost--protect-history nil t))
 
 (defvar-local mattermost--channel-id nil
   "Channel ID for the current buffer.")
@@ -67,26 +66,13 @@ bindings so any text can be typed.
     (when (and mattermost--input-start (< beg mattermost--input-start))
       (user-error "History is read-only"))))
 
-(defun mattermost--clamp-window (win _start)
-  "Prevent scrolling below the draft prompt line."
-  (when (and mattermost--input-start (not mattermost--rendering))
-    (let* ((height (window-body-height win))
-           (max-start (save-excursion
-                        (goto-char mattermost--input-start)
-                        (when (> (forward-line (- 1 height)) 0)
-                          (goto-char (point-min)))
-                        (point))))
-      (when (> (window-start win) max-start)
-        (set-window-start win max-start t)))))
-
 (defun mattermost--in-draft-p ()
   "Return non-nil when point is inside the editable draft."
   (and mattermost--input-start (>= (point) mattermost--input-start)))
 
-(defun mattermost--update-draft-keymap ()
-  "Enable the draft keymap while point is in the draft, disable otherwise."
-  (setq overriding-local-map
-        (if (mattermost--in-draft-p) mattermost--draft-map nil)))
+(defun mattermost--channel-window ()
+  "Return a window displaying the current buffer, searching all frames."
+  (get-buffer-window (current-buffer) t))
 
 (defun mattermost-channel-open (server-id channel-id channel-name)
   "Open a buffer for CHANNEL-ID on SERVER-ID with CHANNEL-NAME."
@@ -104,7 +90,7 @@ bindings so any text can be typed.
       (switch-to-buffer buf)
       (with-current-buffer buf
         (goto-char (point-max))
-        (when-let ((win (get-buffer-window buf)))
+        (when-let ((win (mattermost--channel-window)))
           (set-window-point win (point-max))
           (with-selected-window win
             (recenter -1))))
@@ -156,12 +142,14 @@ bindings so any text can be typed.
      "\n")))
 
 (defun mattermost--render-channel-buffer (&optional new-draft)
-  "Re-render history, prompt and draft; pin prompt to the window bottom.
+  "Re-render history, prompt and draft.
 When NEW-DRAFT is non-nil, replace the draft with it instead of
-recapturing from the buffer.  If the user was reading history, the
-window view is left undisturbed."
+recapturing from the buffer.  If the user was at the bottom (in the
+draft or with the buffer end visible), point returns to the draft and
+the window is recentered to show the prompt; otherwise the window view
+is left undisturbed."
   (let* ((mattermost--rendering t)
-         (win (get-buffer-window (current-buffer)))
+         (win (mattermost--channel-window))
          (old-point (point))
          (old-window-start (when win (window-start win)))
          (was-in-draft (and mattermost--input-start
@@ -207,6 +195,48 @@ window view is left undisturbed."
   (interactive)
   (message "[MM-DEBUG] Refreshing channel...")
   (mattermost-channel-load-history))
+
+(defun mattermost-channel-self-insert ()
+  "Jump to the draft before inserting a character typed in history."
+  (interactive)
+  (unless (mattermost--in-draft-p)
+    (goto-char (point-max)))
+  (self-insert-command 1))
+
+(defun mattermost-channel-space (arg)
+  "Insert a space in the draft; scroll down when in history."
+  (interactive "p")
+  (if (mattermost--in-draft-p)
+      (self-insert-command arg)
+    (scroll-up-command arg)))
+
+(defun mattermost-channel-backspace (arg)
+  "Delete backwards in the draft; scroll up when in history."
+  (interactive "p")
+  (if (mattermost--in-draft-p)
+      (delete-backward-char arg)
+    (scroll-down-command arg)))
+
+(defun mattermost-channel-g ()
+  "Insert g in the draft; refresh history otherwise."
+  (interactive)
+  (if (mattermost--in-draft-p)
+      (self-insert-command 1)
+    (mattermost-channel-refresh)))
+
+(defun mattermost-channel-q ()
+  "Insert q in the draft; quit window otherwise."
+  (interactive)
+  (if (mattermost--in-draft-p)
+      (self-insert-command 1)
+    (quit-window)))
+
+(defun mattermost-channel-h ()
+  "Insert the typed key in the draft; describe mode otherwise."
+  (interactive)
+  (if (mattermost--in-draft-p)
+      (self-insert-command 1)
+    (describe-mode)))
 
 (defun mattermost-channel-ret ()
   "In the draft send the message; in history open the file link."

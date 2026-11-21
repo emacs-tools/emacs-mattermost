@@ -53,7 +53,6 @@ impl AppState {
         let sid = server_id.clone();
         let event_tx = self.event_tx.clone();
 
-        // Создаём клиент для резолвинга имён в WS-событиях
         let ca_path = state.ca_file.as_ref().map(PathBuf::from);
         let client = match MattermostClient::new(state.url.clone(), ca_path.as_deref()) {
             Ok(c) => c,
@@ -83,6 +82,12 @@ impl AppState {
                                                     if let Ok(mut post_obj) =
                                                         serde_json::from_str::<Value>(post_str)
                                                     {
+                                                        let post_id = post_obj
+                                                            .get("id")
+                                                            .and_then(|v| v.as_str())
+                                                            .unwrap_or("unknown")
+                                                            .to_string();
+
                                                         // Резолвим имя отправителя
                                                         if let Some(user_id) = post_obj
                                                             .get("user_id")
@@ -96,6 +101,65 @@ impl AppState {
                                                                     Value::String(
                                                                         user.display_name(),
                                                                     );
+                                                            }
+                                                        }
+
+                                                        // Проверяем file_ids в событии
+                                                        let file_ids: Vec<String> = post_obj
+                                                            .get("file_ids")
+                                                            .and_then(|v| v.as_array())
+                                                            .map(|arr| {
+                                                                arr.iter()
+                                                                    .filter_map(|v| {
+                                                                        v.as_str().map(String::from)
+                                                                    })
+                                                                    .collect()
+                                                            })
+                                                            .unwrap_or_default();
+
+                                                        tracing::debug!(
+                                                            server_id = %sid,
+                                                            post_id = %post_id,
+                                                            file_ids_count = file_ids.len(),
+                                                            file_ids = ?file_ids,
+                                                            "WS posted event received"
+                                                        );
+
+                                                        // Резолвим файлы, если они есть
+                                                        if !file_ids.is_empty() {
+                                                            match client
+                                                                .get_post_files(&token, &post_id)
+                                                                .await
+                                                            {
+                                                                Ok(files) => {
+                                                                    tracing::debug!(
+                                                                        server_id = %sid,
+                                                                        post_id = %post_id,
+                                                                        files_count = files.len(),
+                                                                        "Resolved files for WS event"
+                                                                    );
+                                                                    let files_json: Vec<Value> = files
+                                                                        .iter()
+                                                                        .map(|f| {
+                                                                            serde_json::json!({
+                                                                                "id": f.id,
+                                                                                "name": f.name,
+                                                                                "size": f.size,
+                                                                                "mime_type": f.mime_type,
+                                                                            })
+                                                                        })
+                                                                        .collect();
+                                                                    post_obj["files"] =
+                                                                        Value::Array(files_json);
+                                                                }
+                                                                Err(e) => {
+                                                                    tracing::warn!(
+                                                                        server_id = %sid,
+                                                                        post_id = %post_id,
+                                                                        error = %e,
+                                                                        "Failed to fetch file info for WS event"
+                                                                    );
+                                                                }
                                                             }
                                                         }
 

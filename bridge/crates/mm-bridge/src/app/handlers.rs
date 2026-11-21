@@ -159,8 +159,13 @@ pub async fn handle_list_channels(
         Err(e) => return protocol::Response::err(request.id, e),
     };
 
-    match client.get_my_channels(&token).await {
-        Ok(mut channels) => {
+    // Получаем каналы и команды параллельно
+    let channels_result = client.get_my_channels(&token).await;
+    let teams_result = client.get_teams(&token).await;
+
+    match (channels_result, teams_result) {
+        (Ok(mut channels), Ok(teams)) => {
+            // Резолвим имена для DM-каналов
             for ch in &mut channels {
                 if ch.channel_type == "D" && ch.display_name.is_empty() {
                     let parts: Vec<&str> = ch.name.split("__").collect();
@@ -183,10 +188,11 @@ pub async fn handle_list_channels(
                 serde_json::json!({
                     "server_id": server_id,
                     "channels": channels,
+                    "teams": teams,
                 }),
             )
         }
-        Err(e) => protocol::Response::err(request.id, e.into()),
+        (Err(e), _) | (_, Err(e)) => protocol::Response::err(request.id, e.into()),
     }
 }
 

@@ -326,3 +326,76 @@ pub async fn handle_send_post(
         Err(e) => protocol::Response::err(request.id, e.into()),
     }
 }
+
+pub async fn handle_download_file(
+    app_state: &AppState,
+    data_dir: &Path,
+    request: protocol::Request,
+) -> protocol::Response {
+    tracing::debug!("Received download_file request: {:?}", request.params);
+    let params = match request.params.as_object() {
+        Some(p) => p,
+        None => return protocol_err(request.id, "params must be an object"),
+    };
+    let server_id = get_server_id(params);
+    let file_id = match params.get("file_id").and_then(|v| v.as_str()) {
+        Some(id) => id,
+        None => return protocol_err(request.id, "missing file_id"),
+    };
+    let file_name = params
+        .get("file_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| "download.bin");
+    let download_dir = params
+        .get("download_dir")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| data_dir.join("downloads").to_string_lossy().to_string());
+
+    let client = match get_client(app_state, &server_id) {
+        Ok(c) => c,
+        Err(e) => return protocol::Response::err(request.id, e),
+    };
+    let token = match get_token(app_state, &server_id) {
+        Ok(t) => t,
+        Err(e) => return protocol::Response::err(request.id, e),
+    };
+
+    match client.download_file(&token, file_id).await {
+        Ok(bytes) => {
+            let dir = std::path::PathBuf::from(&download_dir);
+            if let Err(e) = std::fs::create_dir_all(&dir) {
+                return protocol::Response::err(
+                    request.id,
+                    mm_core::BridgeError::new(
+                        mm_core::ErrorKind::InternalError,
+                        format!("Failed to create download dir: {}", e),
+                    ),
+                );
+            }
+
+            let file_path = dir.join(file_name);
+
+            if let Err(e) = std::fs::write(&file_path, &bytes) {
+                return protocol::Response::err(
+                    request.id,
+                    mm_core::BridgeError::new(
+                        mm_core::ErrorKind::InternalError,
+                        format!("Failed to write file: {}", e),
+                    ),
+                );
+            }
+
+            protocol::Response::ok(
+                request.id,
+                serde_json::json!({
+                    "server_id": server_id,
+                    "file_id": file_id,
+                    "local_path": file_path.to_string_lossy(),
+                    "size": bytes.len(),
+                }),
+            )
+        }
+        Err(e) => protocol::Response::err(request.id, e.into()),
+    }
+}

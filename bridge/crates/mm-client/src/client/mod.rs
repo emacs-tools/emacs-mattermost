@@ -294,6 +294,25 @@ impl MattermostClient {
         let post: Post = response.json().await.map_err(ClientError::Http)?;
         Ok(post)
     }
+
+    /// Download a file by its ID. Returns the file bytes.
+    pub async fn download_file(&self, token: &str, file_id: &str) -> Result<Vec<u8>, ClientError> {
+        let url = format!("{}/api/v4/files/{}", self.base_url, file_id);
+        let response = self
+            .client
+            .get(&url)
+            .header(AUTHORIZATION, format!("Bearer {}", token))
+            .send()
+            .await
+            .map_err(ClientError::Http)?;
+
+        if !response.status().is_success() {
+            return Err(api_error(response).await);
+        }
+
+        let bytes = response.bytes().await.map_err(ClientError::Http)?;
+        Ok(bytes.to_vec())
+    }
 }
 
 /// Accept `[fileinfo, ...]`, `{file_infos: [...]}`, or

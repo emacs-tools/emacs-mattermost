@@ -32,6 +32,9 @@ impl App {
             "open_self_dm" => handlers::handle_open_self_dm(&self.state, request).await,
             "get_history" => handlers::handle_get_history(&self.state, request).await,
             "send_post" => handlers::handle_send_post(&self.state, request).await,
+            "download_file" => {
+                handlers::handle_download_file(&self.state, &self.data_dir, request).await
+            }
             _ => protocol::Response::err(
                 request.id,
                 BridgeError::new(

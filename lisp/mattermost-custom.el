@@ -42,6 +42,11 @@ If `inline', show replies in the main buffer."
   :type 'string
   :group 'mattermost)
 
+(defcustom mattermost-download-dir "~/Downloads"
+  "Directory where downloaded files are saved."
+  :type 'directory
+  :group 'mattermost)
+
 (defface mattermost-sender-face
   '((t (:weight bold)))
   "Face used for message sender names in channel buffers."

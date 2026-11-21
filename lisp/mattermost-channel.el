@@ -7,6 +7,7 @@
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C-s") #'mattermost-channel-send-message)
     (define-key map (kbd "g") #'mattermost-channel-refresh)
+    (define-key map (kbd "RET") #'mattermost-channel-open-link)
     map)
   "Keymap for `mattermost-channel-mode`.")
 
@@ -88,7 +89,12 @@
           (let* ((name (or (plist-get f :name) "unknown"))
                  (size (or (plist-get f :size) 0))
                  (id (plist-get f :id)))
-            (format "  📎 %s (%s)\n" name (mattermost--format-file-size size))))
+            (propertize
+             (format "  📎 %s (%s)\n" name (mattermost--format-file-size size))
+             'mm-file-id id
+             'mm-file-name name
+             'mouse-face 'highlight
+             'help-echo "RET to download and open")))
         files
         ""))
      "\n")))
@@ -99,11 +105,11 @@
     (erase-buffer)
     (insert (format "Channel: %s\n" channel-name))
     (insert "========================================\n\n")
-    
+
     (dolist (post posts)
       (insert (mattermost--format-post post))
       (insert "\n"))
-    
+
     (goto-char (point-max))))
 
 (defun mattermost-channel-refresh ()
@@ -121,7 +127,7 @@ The message will appear automatically via WebSocket fan-out; no refresh needed."
          (msg (read-string "Message: ")))
     (when (string-empty-p msg)
       (error "Message cannot be empty"))
-    
+
     (message "[MM-DEBUG] Sending message to channel %s..." channel-id)
     (mattermost--send-request
      "send_post"
@@ -132,6 +138,38 @@ The message will appear automatically via WebSocket fan-out; no refresh needed."
        (if (plist-get response :ok)
            (message "[MM] Message sent. Waiting for WS echo...")
          (message "[MM] Failed to send message: %S" (plist-get response :error)))))))
+
+(defun mattermost-channel-open-link ()
+  "Open the link under point.
+If point is on a file attachment, download it and open with xdg-open.
+Otherwise report that there is no openable link."
+  (interactive)
+  (let ((file-id (get-text-property (point) 'mm-file-id))
+        (file-name (get-text-property (point) 'mm-file-name)))
+    (cond
+     ((and file-id file-name)
+      (let ((server-id mattermost--server-id)
+            (download-dir (expand-file-name mattermost-download-dir)))
+        (unless server-id
+          (error "No server ID associated with this buffer"))
+        (message "[MM] Downloading file: %s to %s..." file-name download-dir)
+        (mattermost--send-request
+         "download_file"
+         (list :server_id server-id
+               :file_id file-id
+               :file_name file-name
+               :download_dir download-dir)
+         (lambda (response)
+           (if (plist-get response :ok)
+               (let* ((result (plist-get response :result))
+                      (local-path (plist-get result :local_path)))
+                 (message "[MM] File saved to: %s" local-path)
+                 ;; Открываем через xdg-open (системное приложение по умолчанию)
+                 (start-process "xdg-open" nil "xdg-open" local-path))
+             (message "[MM] Failed to download file: %S"
+                      (plist-get response :error)))))))
+     (t
+      (message "[MM] No downloadable link under point.")))))
 
 (defun mattermost-channel-on-posted (params)
   "Handle a 'posted' event. PARAMS should contain the 'post' plist."

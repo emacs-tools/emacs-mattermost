@@ -42,4 +42,9 @@ If `inline', show replies in the main buffer."
   :type 'string
   :group 'mattermost)
 
+(defface mattermost-sender-face
+  '((t (:weight bold)))
+  "Face used for message sender names in channel buffers."
+  :group 'mattermost)
+
 (provide 'mattermost-custom)

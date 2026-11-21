@@ -56,7 +56,7 @@
          (message "[MM] Failed to load history: %S" (plist-get response :error)))))))
 
 (defun mattermost--format-post (post)
-  "Format a POST plist for display with multi-line support."
+  "Format a POST plist for display with multi-line support and bold sender."
   (let* ((msg-text (or (plist-get post :message) ""))
          (create-at (plist-get post :create_at))
          (time-str (if create-at
@@ -65,7 +65,10 @@
          (sender (or (plist-get post :user_display_name)
                      (plist-get post :user_id)
                      "unknown")))
-    (format "[%s] **%s:**\n%s\n" time-str sender msg-text)))
+    (concat
+     (format "[%s] **" time-str)
+     (propertize sender 'face 'mattermost-sender-face)
+     (format ":**\n%s\n" msg-text))))
 
 (defun mattermost--render-channel-history (channel-name posts)
   "Render POSTS in the current channel buffer with CHANNEL-NAME."

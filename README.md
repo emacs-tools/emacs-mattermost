@@ -159,15 +159,29 @@ reply_post
 mark_read
 ```
 
-## Emacs package (planned)
+## Emacs package configuration
+
+Add this section to your `init.el`:
 
 ```elisp
 (use-package mattermost
-  :load-path "~/Documents/emacs-mattermost/lisp"
+  :load-path "~/path/to/emacs-mattermost/lisp" ;; Update path or remove after MELPA install
+  :demand t
   :custom
   (mattermost-bridge-host "127.0.0.1")
   (mattermost-bridge-port 8765)
-  (mattermost-thread-display 'separate-buffer))
+  (mattermost-server-url "https://mattermost.your-company.local")
+  (mattermost-server-id "work")
+  (mattermost-thread-display 'separate-buffer)
+  (mattermost-download-dir "~/Downloads")
+  :bind
+  (("C-c M d" . mattermost-open-self-dm)
+   ("C-c M D" . mattermost-dashboard)
+   ("C-c M r" . mattermost-reset-state))
+  :config
+  ;; Recommended: use auth-source instead of plain text password
+  ;; (setq mattermost-password (auth-source-pass-get 'secret "mattermost/work"))
+  (message "Mattermost package loaded. Use C-c M d to open self-DM."))
 ```
 
 Buffer naming keeps server identity visible even in single-server MVP:
@@ -217,3 +231,12 @@ To verify the bridge works against your corporate Mattermost instance:
    ./scripts/mm-cli.sh '{"id":"4","type":"request","method":"get_history","params":{"server_id":"work","channel_id":"<ID_FROM_STEP_3>","limit":1}}'
    ```
 
+## MELPA Readiness Checklist
+
+- [x] Standard package header in `lisp/mattermost.el` (`;; Version`, `;; Package-Requires`, `;; License`).
+- [x] Missing `lisp/mattermost-files.el` created and required.
+- [x] Dockerfile uses public images by default (reproducible builds), removable `# syntax` directive to avoid DNS timeouts.
+- [ ] `LICENSE` file (GPLv3+) added to the repository root.
+- [ ] `Makefile` added with `compile` and `lint` targets for CI.
+- [ ] CI pipeline configured to run `make lint` and `make compile` on push.
+- [ ] Recipe submitted to the `melpa/melpa` repository.

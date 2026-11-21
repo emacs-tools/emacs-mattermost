@@ -4,8 +4,10 @@ services:
       context: .
       dockerfile: docker/Dockerfile
       args:
-        RUST_BUILDER_IMAGE: "${RUST_BUILDER_IMAGE:-nexus.spacecorp.ru/rust:1.90-bookworm}"
-        RUNTIME_IMAGE: "${RUNTIME_IMAGE:-nexus.c68.spacecorp.ru/ci/debian:bookworm-ca}"
+        # Публичные образы по умолчанию для совместимости с MELPA.
+        # Для корпоративной среды переопределите их в файле .env
+        RUST_BUILDER_IMAGE: "${RUST_BUILDER_IMAGE:-rust:1.90-bookworm}"
+        RUNTIME_IMAGE: "${RUNTIME_IMAGE:-debian:bookworm-slim}"
     container_name: emacs-mattermost-bridge
     restart: unless-stopped
     environment:
@@ -13,6 +15,10 @@ services:
       MM_WEB_LISTEN: "0.0.0.0:8766"
       MM_DATA_DIR: "/data"
       RUST_LOG: "mm_bridge=info,mm_web=info,warn"
+      # Поддержка корпоративного прокси
+      HTTP_PROXY: "${HTTP_PROXY:-}"
+      HTTPS_PROXY: "${HTTPS_PROXY:-}"
+      NO_PROXY: "${NO_PROXY:-}"
     ports:
       - "127.0.0.1:8765:8765"
       - "127.0.0.1:8766:8766"

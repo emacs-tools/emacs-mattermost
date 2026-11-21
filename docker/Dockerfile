@@ -1,11 +1,7 @@
-ARG RUST_BUILDER_IMAGE=nexus.spacecorp.ru/rust:1.90-bookworm
-ARG RUNTIME_IMAGE=nexus.spacecorp.ru/ci/debian:bookworm-ca
+ARG RUST_BUILDER_IMAGE=rust:1.90-bookworm
+ARG RUNTIME_IMAGE=debian:bookworm-slim
 
 FROM ${RUST_BUILDER_IMAGE} AS builder
-
-# Corporate CA so cargo trusts nexus.local over HTTPS.
-COPY docker/certs/corporate-ca.crt /usr/local/share/ca-certificates/corporate-ca.crt
-RUN update-ca-certificates
 
 WORKDIR /build
 
@@ -13,13 +9,18 @@ COPY bridge/Cargo.toml bridge/Cargo.lock ./
 COPY bridge/.cargo ./.cargo
 COPY bridge/crates ./crates
 
-# NOTE: bridge/rust-toolchain.toml is intentionally NOT copied into the image.
-
-RUN TOOLCHAIN="$(ls /usr/local/rustup/toolchains | head -n1)" \
-    && echo "Using preinstalled toolchain: ${TOOLCHAIN}" \
-    && RUSTUP_TOOLCHAIN="${TOOLCHAIN}" cargo build --release --locked -p mm-bridge
+RUN cargo build --release --locked -p mm-bridge
 
 FROM ${RUNTIME_IMAGE} AS runtime
+
+# Runtime-зависимости:
+# - libssl3: для динамической линковки OpenSSL (используется reqwest/hyper-tls)
+# - ca-certificates: корневые сертификаты для HTTPS-запросов к Mattermost
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       libssl3 \
+       ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --system --uid 10001 --create-home --home-dir /home/mmbridge mmbridge \
     && mkdir -p /data \

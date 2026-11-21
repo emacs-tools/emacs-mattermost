@@ -66,6 +66,24 @@ impl MattermostClient {
         Ok(user)
     }
 
+    pub async fn get_user(&self, token: &str, user_id: &str) -> Result<User, ClientError> {
+        let url = format!("{}/api/v4/users/{}", self.base_url, user_id);
+        let response = self
+            .client
+            .get(&url)
+            .header(AUTHORIZATION, format!("Bearer {}", token))
+            .send()
+            .await
+            .map_err(ClientError::Http)?;
+
+        if !response.status().is_success() {
+            return Err(api_error(response).await);
+        }
+
+        let user: User = response.json().await.map_err(ClientError::Http)?;
+        Ok(user)
+    }
+
     pub async fn get_teams(&self, token: &str) -> Result<Vec<mm_core::Team>, ClientError> {
         let url = format!("{}/api/v4/users/me/teams", self.base_url);
         let response = self
@@ -130,7 +148,6 @@ impl MattermostClient {
         Ok(ChannelId::new(ch.id))
     }
 
-    /// Get posts for a channel. `before` = oldest known post id for pagination.
     pub async fn get_posts(
         &self,
         token: &str,

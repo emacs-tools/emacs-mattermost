@@ -1,7 +1,7 @@
 use crate::app::state::{AppState, ConnectionState};
 use crate::protocol;
 use mm_client::MattermostClient;
-use mm_core::{BridgeError, ErrorKind, ServerConfig, ServerId, User};
+use mm_core::{BridgeError, Channel, ErrorKind, ServerConfig, ServerId, User};
 use mm_store::{ServerStore, TokenStore};
 use std::path::{Path, PathBuf};
 
@@ -63,7 +63,6 @@ pub async fn handle_connect(
                         },
                     );
 
-                    // Start WebSocket in background
                     tracing::info!(server_id = %server_id, "Connection established, starting WebSocket");
                     if let Err(e) = app_state.start_ws(&server_id).await {
                         tracing::error!(server_id = %server_id, "Failed to start WebSocket: {}", e);
@@ -154,15 +153,46 @@ pub async fn handle_list_channels(
         Ok(t) => t,
         Err(e) => return protocol::Response::err(request.id, e),
     };
+    let current_user_id = match get_user_id(app_state, &server_id) {
+        Ok(id) => id.0,
+        Err(e) => return protocol::Response::err(request.id, e),
+    };
 
     match client.get_my_channels(&token).await {
-        Ok(channels) => protocol::Response::ok(
-            request.id,
-            serde_json::json!({
-                "server_id": server_id,
-                "channels": channels,
-            }),
-        ),
+        Ok(mut channels) => {
+            // Пост-обработка: разрешение имён для DM-каналов
+            for ch in &mut channels {
+                if ch.channel_type == "D" && ch.display_name.is_empty() {
+                    let parts: Vec<&str> = ch.name.split("__").collect();
+                    if parts.len() == 2 {
+                        let other_user_id = if parts[0] == current_user_id {
+                            parts[1]
+                        } else {
+                            parts[0]
+                        };
+
+                        if let Ok(other_user) = client.get_user(&token, other_user_id).await {
+                            let name = if !other_user.first_name.is_empty() {
+                                format!("{} {}", other_user.first_name, other_user.last_name)
+                                    .trim()
+                                    .to_string()
+                            } else {
+                                other_user.username
+                            };
+                            ch.display_name = name;
+                        }
+                    }
+                }
+            }
+
+            protocol::Response::ok(
+                request.id,
+                serde_json::json!({
+                    "server_id": server_id,
+                    "channels": channels,
+                }),
+            )
+        }
         Err(e) => protocol::Response::err(request.id, e.into()),
     }
 }

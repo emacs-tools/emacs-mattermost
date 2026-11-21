@@ -1,7 +1,9 @@
 use mm_client::ws::WsConnection;
 use mm_core::{BridgeError, ErrorKind, ServerId, User};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast;
 
 #[derive(Debug, Clone)]
 pub struct ConnectionState {
@@ -15,13 +17,20 @@ pub struct ConnectionState {
 #[derive(Debug, Clone)]
 pub struct AppState {
     connections: Arc<Mutex<HashMap<ServerId, ConnectionState>>>,
+    event_tx: broadcast::Sender<Value>,
 }
 
 impl AppState {
     pub fn new() -> Self {
+        let (tx, _) = broadcast::channel(100); // Буфер до 100 событий
         Self {
             connections: Arc::new(Mutex::new(HashMap::new())),
+            event_tx: tx,
         }
+    }
+
+    pub fn subscribe_events(&self) -> broadcast::Receiver<Value> {
+        self.event_tx.subscribe()
     }
 
     pub fn get_connection(&self, server_id: &ServerId) -> Result<ConnectionState, BridgeError> {
@@ -40,6 +49,7 @@ impl AppState {
     pub async fn start_ws(&self, server_id: &ServerId) -> Result<(), BridgeError> {
         let state = self.get_connection(server_id)?;
         let sid = server_id.clone();
+        let event_tx = self.event_tx.clone();
 
         tokio::spawn(async move {
             match WsConnection::new(&state.url, &state.token).await {
@@ -48,8 +58,35 @@ impl AppState {
                     loop {
                         match ws.next_event().await {
                             Ok(Some(event_data)) => {
-                                tracing::debug!(server_id = %sid, "WS Event: {}", event_data);
-                                // TODO: Fan out to Emacs clients
+                                // Пытаемся распарсить и нормализовать событие 'posted'
+                                if let Ok(json_val) = serde_json::from_str::<Value>(&event_data) {
+                                    if let Some(event_type) =
+                                        json_val.get("event").and_then(|v| v.as_str())
+                                    {
+                                        if event_type == "posted" {
+                                            if let Some(data) = json_val.get("data") {
+                                                // Mattermost присылает post как строку, содержащую JSON
+                                                if let Some(post_str) =
+                                                    data.get("post").and_then(|v| v.as_str())
+                                                {
+                                                    if let Ok(post_obj) =
+                                                        serde_json::from_str::<Value>(post_str)
+                                                    {
+                                                        let normalized = serde_json::json!({
+                                                            "type": "event",
+                                                            "method": "posted",
+                                                            "params": {
+                                                                "post": post_obj
+                                                            }
+                                                        });
+                                                        // Игнорируем ошибку, если нет подписчиков (Emacs отключён)
+                                                        let _ = event_tx.send(normalized);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             Ok(None) => {
                                 tracing::warn!(server_id = %sid, "WebSocket closed");

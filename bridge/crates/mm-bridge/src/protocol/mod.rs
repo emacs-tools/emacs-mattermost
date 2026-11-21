@@ -122,6 +122,14 @@ pub fn encode_response(response: &Response) -> Result<String, BridgeError> {
     Ok(line)
 }
 
+/// Encodes a standalone event (not tied to a specific request ID)
+pub fn encode_event(event_payload: &Value) -> Result<String, BridgeError> {
+    let mut line = serde_json::to_string(event_payload)
+        .map_err(|err| BridgeError::new(ErrorKind::InternalError, err.to_string()))?;
+    line.push('\n');
+    Ok(line)
+}
+
 pub fn pong_result() -> Value {
     json!({ "pong": true })
 }

@@ -68,8 +68,11 @@
              (time-str (if create-at
                            (format-time-string "%H:%M" (seconds-to-time (/ create-at 1000)))
                          "??:??"))
-             (user-id (or (plist-get post :user_id) "unknown")))
-        (insert (format "[%s] %s: %s\n" time-str user-id msg-text))))
+             ;; Используем user_display_name, если есть, иначе user_id
+             (sender (or (plist-get post :user_display_name)
+                         (plist-get post :user_id)
+                         "unknown")))
+        (insert (format "[%s] %s: %s\n" time-str sender msg-text))))
     
     (insert "\n")
     (goto-char (point-max))))
@@ -81,7 +84,8 @@
   (mattermost-channel-load-history))
 
 (defun mattermost-channel-send-message ()
-  "Send a message to the current channel."
+  "Send a message to the current channel.
+The message will appear automatically via WebSocket fan-out; no refresh needed."
   (interactive)
   (let* ((server-id mattermost--server-id)
          (channel-id mattermost--channel-id)
@@ -97,9 +101,29 @@
            :message msg)
      (lambda (response)
        (if (plist-get response :ok)
-           (progn
-             (message "[MM] Message sent successfully.")
-             (mattermost-channel-refresh))
+           (message "[MM] Message sent. Waiting for WS echo...")
          (message "[MM] Failed to send message: %S" (plist-get response :error)))))))
+
+(defun mattermost-channel-on-posted (params)
+  "Handle a 'posted' event. PARAMS should contain the 'post' plist."
+  (let* ((post (plist-get params :post))
+         (channel-id (plist-get post :channel_id))
+         (msg-text (or (plist-get post :message) ""))
+         (create-at (plist-get post :create_at))
+         (time-str (if create-at
+                       (format-time-string "%H:%M" (seconds-to-time (/ create-at 1000)))
+                     "??:??"))
+         (sender (or (plist-get post :user_display_name)
+                     (plist-get post :user_id)
+                     "unknown")))
+    (dolist (buf (buffer-list))
+      (with-current-buffer buf
+        (when (and (eq major-mode 'mattermost-channel-mode)
+                   (string= mattermost--channel-id channel-id))
+          (let ((inhibit-read-only t))
+            (goto-char (point-max))
+            (insert (format "[%s] %s: %s\n" time-str sender msg-text))
+            (when (= (point) (point-max))
+              (goto-char (point-max)))))))))
 
 (provide 'mattermost-channel)

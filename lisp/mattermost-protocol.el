@@ -25,28 +25,21 @@
          mattermost-bridge-host
          mattermost-bridge-port))
   
-  ;; Очищаем буфер при новом подключении
   (setq mattermost--input-buffer "")
-  
   (set-process-filter mattermost--process #'mattermost--process-filter)
   (message "[MM-PROTOCOL] Connected to Mattermost bridge."))
 
 (defun mattermost--process-filter (_proc output)
   "Handle OUTPUT from the bridge process with proper chunk buffering."
-  ;; Добавляем новые данные к накопителю
   (setq mattermost--input-buffer (concat mattermost--input-buffer output))
   
-  ;; Разбиваем по переносам строк
   (let ((lines (split-string mattermost--input-buffer "\n" t)))
-    ;; Последняя строка может быть неполной — сохраняем её на следующий вызов
     (if (string-suffix-p "\n" output)
         (setq mattermost--input-buffer "")
       (setq mattermost--input-buffer (car (last lines)))
-      ;; Убираем последний (неполный) элемент из списка для обработки
       (setq lines (butlast lines)))
     
     (dolist (line lines)
-      ;; ДОБАВЛЕНО: :array-type 'list чтобы JSON-массивы становились списками, а не векторами
       (let ((msg (ignore-errors (json-parse-string line :object-type 'plist :array-type 'list))))
         (if msg
             (let ((id (plist-get msg :id))
@@ -67,13 +60,10 @@
 (defun mattermost--send-request (method params callback)
   "Send a request with METHOD and PARAMS, calling CALLBACK on response."
   (let* ((id (format "req-%d" (random 100000)))
-         ;; 1. Создаем реальный payload для отправки
          (payload (list :id id :type "request" :method method :params params))
          (json-str (concat (json-encode payload) "\n"))
-         ;; 2. Создаем копию ТОЛЬКО для логирования
          (safe-params (copy-tree params)))
     
-    ;; Маскируем пароль в копии для лога
     (when (plist-get safe-params :password)
       (plist-put safe-params :password "***MASKED***"))
     
@@ -81,12 +71,16 @@
       (message "[MM-PROTOCOL] Sending request id=%s method=%s" id method))
     
     (puthash id callback mattermost--pending-requests)
-    ;; Отправляем реальный json-str с настоящим паролем!
     (process-send-string mattermost--process json-str)))
 
-(defun mattermost--handle-event (_msg)
+(defun mattermost--handle-event (msg)
   "Handle an asynchronous event MSG from the bridge."
-  ;; TODO: Fan out events to buffers
-  )
+  (let ((method (plist-get msg :method))
+        (params (plist-get msg :params)))
+    (cond
+     ((string= method "posted")
+      (mattermost-channel-on-posted params))
+     (t
+      (message "[MM-DEBUG] Unhandled event method: %s" method)))))
 
 (provide 'mattermost-protocol)

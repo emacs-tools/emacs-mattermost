@@ -97,11 +97,20 @@
                         'mm-channel-name label
                         'mouse-face 'highlight))))
 
+(defun mattermost--sort-channels-by-activity (channels)
+  "Sort CHANNELS by last_post_at descending (most recent first)."
+  (sort channels
+        (lambda (a b)
+          (> (or (plist-get a :last_post_at) 0)
+             (or (plist-get b :last_post_at) 0)))))
+
 (defun mattermost--render-dashboard (server-id channels teams)
   "Render CHANNELS grouped by TEAMS for SERVER-ID."
   (let ((buf (get-buffer-create "*Mattermost Dashboard*"))
         (by-team (make-hash-table :test 'equal))
         (dms nil))
+    ;; Сортируем каналы по активности
+    (setq channels (mattermost--sort-channels-by-activity channels))
     (dolist (ch channels)
       (let ((type (plist-get ch :type)))
         (if (member type '("D" "G"))
@@ -124,6 +133,7 @@
               (when chs
                 (puthash tid t rendered)
                 (mattermost--insert-team-header (plist-get team :display_name))
+                ;; Каналы уже отсортированы, просто реверсим для правильного порядка
                 (dolist (ch (nreverse chs))
                   (mattermost--insert-channel-line ch))
                 (insert "\n"))))

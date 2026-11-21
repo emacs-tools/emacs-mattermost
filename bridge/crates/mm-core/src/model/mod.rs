@@ -85,9 +85,12 @@ pub struct Channel {
     pub id: ChannelId,
     pub team_id: TeamId,
     #[serde(rename = "type")]
-    pub channel_type: String, // "O" (Open), "P" (Private), "D" (Direct), "G" (Group)
+    pub channel_type: String,
     pub display_name: String,
     pub name: String,
+    /// Timestamp of the last post in this channel (milliseconds since epoch).
+    #[serde(default)]
+    pub last_post_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,7 +106,6 @@ pub struct Post {
     #[serde(default)]
     pub file_ids: Vec<String>,
     /// Populated by the bridge after resolving user_id via /users/ids.
-    /// Skipped during deserialization from Mattermost API.
     #[serde(default, skip_deserializing)]
     pub user_display_name: String,
 }

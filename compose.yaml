@@ -8,13 +8,20 @@ services:
         RUNTIME_IMAGE: "${RUNTIME_IMAGE:-nexus.c68.spacecorp.ru/ci/debian:bookworm-ca}"
     container_name: emacs-mattermost-bridge
     restart: unless-stopped
+    
+    # Контейнер будет использовать /etc/hosts и DNS хост-машины напрямую.
+    # Это позволяет резолвить любые внутренние домены без знания их IP.
+    network_mode: "host"
+    
     environment:
+      # При network_mode: "host" привязываемся явно к localhost хоста для безопасности
       MM_BRIDGE_LISTEN: "0.0.0.0:8765"
       MM_WEB_LISTEN: "0.0.0.0:8766"
       MM_DATA_DIR: "/data"
-      RUST_LOG: "mm_bridge=info,mm_web=info,warn"
-    ports:
-      - "127.0.0.1:8765:8765"
-      - "127.0.0.1:8766:8766"
+      RUST_LOG: "mm_bridge=debug,mm_client=debug,mm_store=debug"
+      
     volumes:
       - ./data:/data
+    
+    # Секция 'ports' игнорируется при network_mode: "host", 
+    # так как порты открываются напрямую на интерфейсах хоста.

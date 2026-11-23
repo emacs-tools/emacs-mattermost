@@ -6,6 +6,7 @@ FROM ${RUST_BUILDER_IMAGE} AS builder
 # Corporate CA so cargo trusts nexus.local over HTTPS.
 COPY docker/certs/corporate-ca.crt /usr/local/share/ca-certificates/corporate-ca.crt
 RUN update-ca-certificates
+RUN apt install -y curl
 
 WORKDIR /build
 
@@ -30,7 +31,10 @@ COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-USER mmbridge
+# NOTE: Intentionally no `USER mmbridge` here. The entrypoint runs as root,
+# fixes /data ownership, then drops privileges via runuser(1).
+# This avoids "Permission denied" on bind-mounted volumes whose host-side
+# ownership does not match UID 10001.
 
 ENV MM_BRIDGE_LISTEN=0.0.0.0:8765
 ENV MM_WEB_LISTEN=0.0.0.0:8766
